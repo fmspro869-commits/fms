@@ -20,7 +20,7 @@ import {
 } from './fieldGeometry';
 import { colorizeTerrariumPixels, fieldMaskTileUrl } from './slopeTiles';
 
-const DEFAULT_CENTER: [number, number] = [0, 0];
+const DEFAULT_CENTER: [number, number] = [19, 52];
 const SLOPE_TILE_CACHE_LIMIT = 48;
 const slopeTileCache = new Map<string, ArrayBuffer>();
 let slopeProtocolRegistered = false;
@@ -438,7 +438,7 @@ const RealisticTerrainMapRenderer = forwardRef<MapHandle, Props>(function Realis
         container: containerRef.current,
         style: STYLE,
         center: mapCenter,
-        zoom: field || validPosition ? 16 : validCenter ? 13 : fields?.length ? 6 : 2,
+        zoom: field || validPosition ? 16 : validCenter ? 13 : fields?.length ? 6 : 9,
         pitch: 64,
         bearing: -18,
         maxPitch: 85,

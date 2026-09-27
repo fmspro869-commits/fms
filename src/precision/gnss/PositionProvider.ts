@@ -17,6 +17,7 @@ export interface PositionProvider {
 
   getCurrent(): PositionData | null;
   getStatus(): GNSSStatus;
+  getError?(): string | null;
 
   subscribe(listener: (pos: PositionData) => void): () => void;
   subscribeStatus(listener: (status: GNSSStatus) => void): () => void;

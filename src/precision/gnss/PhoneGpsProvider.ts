@@ -34,33 +34,44 @@ export class PhoneGpsProvider implements PositionProvider {
       this.emitStatus();
       return;
     }
+    if (typeof window !== 'undefined' && !window.isSecureContext) {
+      this.error = 'Lokalizacja GPS wymaga bezpiecznego połączenia HTTPS.';
+      this.emitStatus();
+      return;
+    }
 
     this.running = true;
     this.error = null;
 
-    this.watchId = navigator.geolocation.watchPosition(
-      (pos) => {
-        const fix: GpsFix = {
-          lat: pos.coords.latitude,
-          lng: pos.coords.longitude,
-          accuracy: pos.coords.accuracy ?? 999,
-          speed: typeof pos.coords.speed === 'number' && pos.coords.speed >= 0 ? pos.coords.speed : -1,
-          heading: typeof pos.coords.heading === 'number' && !Number.isNaN(pos.coords.heading) ? pos.coords.heading : NaN,
-          altitude: typeof pos.coords.altitude === 'number' && !Number.isNaN(pos.coords.altitude) ? pos.coords.altitude : null,
-          timestamp: pos.timestamp,
-        };
-        this.current = gpsFixToPosition(fix, 'PHONE');
-        this.error = null;
-        this.emit();
-        this.emitStatus();
-      },
-      (err) => {
-        this.error = ERR_MESSAGES[err.code] || err.message || 'Nieznany błąd GPS';
-        this.current = null;
-        this.emitStatus();
-      },
-      { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 }
-    );
+    try {
+      this.watchId = navigator.geolocation.watchPosition(
+        (pos) => {
+          const fix: GpsFix = {
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude,
+            accuracy: pos.coords.accuracy ?? 999,
+            speed: typeof pos.coords.speed === 'number' && pos.coords.speed >= 0 ? pos.coords.speed : -1,
+            heading: typeof pos.coords.heading === 'number' && !Number.isNaN(pos.coords.heading) ? pos.coords.heading : NaN,
+            altitude: typeof pos.coords.altitude === 'number' && !Number.isNaN(pos.coords.altitude) ? pos.coords.altitude : null,
+            timestamp: pos.timestamp,
+          };
+          this.current = gpsFixToPosition(fix, 'PHONE');
+          this.error = null;
+          this.emit();
+          this.emitStatus();
+        },
+        (err) => {
+          this.error = ERR_MESSAGES[err.code] || err.message || 'Nieznany błąd GPS';
+          this.current = null;
+          this.emitStatus();
+        },
+        { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 }
+      );
+    } catch (error) {
+      this.running = false;
+      this.error = error instanceof Error ? error.message : 'Nie można uruchomić lokalizacji GPS.';
+      this.emitStatus();
+    }
   }
 
   stop(): void {

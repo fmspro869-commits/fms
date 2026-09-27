@@ -141,8 +141,6 @@ export default function FieldPilot({ initialFieldId }: { initialFieldId?: string
   const [toolsOpen, setToolsOpen] = useState(false);
   const [layerMenu, setLayerMenu] = useState(false);
   const [cameraMenu, setCameraMenu] = useState(false);
-  const [leftControlsOpen, setLeftControlsOpen] = useState(true);
-  const [rightControlsOpen, setRightControlsOpen] = useState(true);
   const [manualLabel, setManualLabel] = useState<string | null>(null);
   const demoSimulationStartedRef = useRef(false);
   const mapApi = useRef<MapHandle>(null);
@@ -153,7 +151,7 @@ export default function FieldPilot({ initialFieldId }: { initialFieldId?: string
   const device = useDeviceHeading(phase === 'running' && !isDemo);
   const speech = useSpeechAlerts(voice);
   const wake = useWakeLock();
-  const { position, status: gnssStatus, demoProvider, error } = usePosition({
+  const { position, status: gnssStatus, demoProvider, error, retry: retryPosition } = usePosition({
     enabled: phase === 'running',
     preferredSource: isDemo ? 'DEMO' : serial.connected ? 'EXTERNAL_GNSS' : 'AUTO',
   });
@@ -239,12 +237,6 @@ export default function FieldPilot({ initialFieldId }: { initialFieldId?: string
     const step = Math.max(1, Math.ceil(pts.length / 400));
     return pts.filter((_, i) => i % step === 0);
   }, [track, config.width]);
-
-  const overlap = useMemo(() => {
-    const half = config.width / 2;
-    const a = Math.abs(nav.xte);
-    return geometry && a > half ? a - half : 0;
-  }, [geometry, nav, config.width]);
 
   const mapRotation = courseUp && heading !== null ? -heading : 0;
 
@@ -464,6 +456,15 @@ export default function FieldPilot({ initialFieldId }: { initialFieldId?: string
 
   useEffect(() => stopSimTimer, [stopSimTimer]);
 
+  useEffect(() => {
+    if (!terminal) return;
+    const exitTerminal = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setTerminal(false);
+    };
+    window.addEventListener('keydown', exitTerminal);
+    return () => window.removeEventListener('keydown', exitTerminal);
+  }, [terminal]);
+
   const finishWork = useCallback(() => {
     stopSimTimer();
     const endedAt = new Date().toISOString();
@@ -616,7 +617,6 @@ export default function FieldPilot({ initialFieldId }: { initialFieldId?: string
   const cropName = fieldCrop?.cropName || '';
   const noGps = !isDemo && !position;
   const nextLine = nav.activeLine && geometry ? geometry.lines[nav.activeIndex] : undefined;
-  const progressPct = stats.totalLines > 0 ? Math.min(100, (stats.linesDone / stats.totalLines) * 100) : coverage.coveragePercent;
   const acc = isDemo ? (fix?.accuracy ?? 1) : fix?.accuracy ?? 0;
   const gpsDot = noGps ? '🔴'
     : gnssStatus.fixType === 'RTK_FIX' ? '🟢'
@@ -624,8 +624,8 @@ export default function FieldPilot({ initialFieldId }: { initialFieldId?: string
     : gnssStatus.fixType === 'GNSS' ? '🔵'
     : acc <= 5 ? '🟢' : acc <= 10 ? '🟡' : '🔴';
   const toggleCls = (on: boolean) => (on ? (dark ? 'bg-[#ff3b30]' : 'bg-emerald-500') : 'bg-slate-600');
-  const rnd = `w-10 h-10 flex items-center justify-center rounded-xl backdrop-blur-md border text-lg font-bold shadow-lg active:scale-90 transition-transform ${dark ? 'bg-black/60 border-[#ff3b30]/30' : 'bg-slate-900/60 border-white/10'}`;
-  const hud = `rounded-2xl border backdrop-blur-md shadow-xl ${dark ? 'bg-black/70 border-[#ff3b30]/30 text-[#ff5a52]' : 'bg-slate-900/65 border-white/10 text-white'}`;
+  const rnd = `flex h-11 w-11 items-center justify-center rounded-xl border text-base font-bold shadow-sm backdrop-blur-md active:scale-90 transition-transform ${dark ? 'bg-black/65 border-[#ff3b30]/25' : 'bg-[rgba(5,10,15,0.72)] border-white/10'} text-white`;
+  const hud = 'rounded-xl border border-white/10 bg-[rgba(5,10,15,0.68)] text-white shadow-sm backdrop-blur-md';
   const LAYERS: { id: MapLayer; label: string }[] = [
     { id: 'map', label: '🗺️ Mapa' },
     { id: 'satellite', label: '🛰️ Satelita' },
@@ -718,36 +718,34 @@ export default function FieldPilot({ initialFieldId }: { initialFieldId?: string
         )}
       </div>
 
-      <div className="absolute left-0 right-0 top-0 flex items-start justify-between gap-2 p-2" style={{ paddingTop: 'calc(env(safe-area-inset-top) + 8px)' }}>
-        <div className={`${hud} px-3 py-2 max-w-[52%]`}>
-          <div className={`text-[11px] font-black tracking-wide ${dark ? 'text-[#ff5a52]' : 'text-emerald-400'}`}>🚜 FMS FIELD PILOT</div>
-          <div className="text-sm font-bold leading-tight truncate" data-testid={isDemo ? 'demo-field-label' : undefined}>{field?.name || '—'}</div>
-          <div className={`text-[10px] ${dark ? 'text-[#ff5a52]/70' : 'text-slate-300'}`}>{isDemo ? '🧪 GRANICA ORIENTACYJNA · ' : cropName ? `${cropName}${fieldCrop ? ` · BBCH ${fieldCrop.bbch}` : ''} · ` : ''}{config.treatmentType} · {config.width.toFixed(2)} m</div>
-        </div>
-        <div className="flex flex-col items-end gap-1">
-          <div className={`${hud} px-3 py-2 grid grid-cols-2 gap-x-3 gap-y-1`}>
-            <span className="text-[10px] font-bold tabular-nums" data-testid="hud-gps">{isDemo ? '🧪 DEMO' : `${gpsDot} ${gnssStatus.fixType === 'NONE' ? 'NO GPS' : gnssStatus.fixType}`} · {position?.accuracy != null ? `±${position.accuracy.toFixed(1)} m` : '±—'}</span>
-            <span className="text-[10px] font-bold tabular-nums">SAT {position?.satellites ?? '—'} · {speedKmh.toFixed(1)} km/h</span>
-            <span className="text-[10px] font-bold tabular-nums">HEADING {heading !== null ? `${Math.round(heading)}°` : '—'}</span>
-            <span className="text-[10px] font-bold tabular-nums">ELEV {terrainReadout.elevation !== null ? `${terrainReadout.elevation.toFixed(0)} m DEM` : 'DATA UNAVAILABLE'}</span>
-            <span className="text-[10px] font-bold tabular-nums">SLOPE {terrainReadout.slopePercent !== null ? `${terrainReadout.slopePercent >= 0 ? '+' : ''}${terrainReadout.slopePercent.toFixed(1)}%` : 'DATA UNAVAILABLE'}</span>
-            <span className={`text-[10px] font-black tabular-nums ${dark ? 'text-[#ff5a52]' : 'text-amber-300'}`}>{nav.activeLine ? `${nav.activeLine.label} ACTIVE` : 'L--'} / {stats.totalLines || '--'}</span>
-            <button data-testid="end-work-btn" onClick={finishWork} className="col-span-2 ml-auto min-h-[36px] px-3 rounded-lg bg-red-600 text-white text-xs font-bold">🛑 ZAKOŃCZ</button>
+      <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between gap-2 p-2" style={{ paddingTop: 'calc(env(safe-area-inset-top) + 8px)' }}>
+        <div className={`${hud} pointer-events-auto max-w-[190px] px-2.5 py-2 text-[10px] leading-tight sm:max-w-[210px]`} data-testid="gps-hud">
+          <div className="flex items-center gap-1.5 font-black tracking-wide" data-testid="hud-gps">
+            <span>{isDemo ? '🧪 DEMO' : `${gpsDot} ${gnssStatus.fixType === 'NONE' ? 'NO GPS' : gnssStatus.fixType}`}</span>
+            {!isDemo && position?.accuracy != null && <span className="font-medium text-slate-300">±{position.accuracy.toFixed(1)} m</span>}
           </div>
-          {isDemo && <span className="rounded-full bg-sky-500/90 text-white text-[10px] font-black px-2 py-0.5 animate-pulse shadow-lg" data-testid="demo-badge">🧪 DEMO — SYMULACJA GPS</span>}
-          {!isDemo && acc > 5 && !noGps && <span className="rounded-full bg-amber-500/90 text-black text-[10px] font-black px-2 py-0.5" data-testid="gps-warn">⚠ NISKA DOKŁADNOŚĆ GPS</span>}
-          {!isDemo && gnssStatus.fixType === 'RTK_FIX' && <span className="rounded-full bg-emerald-500/90 text-black text-[10px] font-black px-2 py-0.5" data-testid="rtk-fix-badge">🟢 RTK FIX</span>}
-          {!isDemo && gnssStatus.fixType === 'RTK_FLOAT' && <span className="rounded-full bg-amber-500/90 text-black text-[10px] font-black px-2 py-0.5" data-testid="rtk-float-badge">🟡 RTK FLOAT</span>}
-          {!isDemo && gnssStatus.source === 'EXTERNAL_GNSS' && gnssStatus.fixType !== 'RTK_FIX' && gnssStatus.fixType !== 'RTK_FLOAT' && <span className="rounded-full bg-sky-500/90 text-black text-[10px] font-black px-2 py-0.5" data-testid="external-gnss-badge">📡 EXTERNAL</span>}
+          <div className="mt-1 flex items-center gap-2 text-slate-300">
+            <span>{isDemo ? 'SYMULACJA' : `${position?.satellites ?? '—'} SAT`}</span>
+            <span>{speedKmh.toFixed(1)} km/h</span>
+          </div>
+          {noGps && error && <div className="mt-1 max-w-44 text-[9px] text-amber-200">{error}</div>}
+          {noGps && <button onClick={retryPosition} className="pointer-events-auto mt-1.5 min-h-8 rounded-lg border border-white/15 px-2 text-[10px] font-bold text-white" data-testid="retry-gps-btn">GPS · PONÓW</button>}
+          {isDemo && <span className="mt-1 block text-[9px] font-black text-sky-300" data-testid="demo-badge">🧪 DEMO — GPS SYMULOWANY</span>}
+          {!isDemo && acc > 5 && !noGps && <span className="mt-1 block text-[9px] font-bold text-amber-300" data-testid="gps-warn">⚠ SŁABY GPS</span>}
+          {!isDemo && gnssStatus.fixType === 'RTK_FIX' && <span className="mt-1 block text-[9px] font-black text-emerald-300" data-testid="rtk-fix-badge">🟢 RTK FIX</span>}
+          {!isDemo && gnssStatus.fixType === 'RTK_FLOAT' && <span className="mt-1 block text-[9px] font-black text-amber-300" data-testid="rtk-float-badge">🟡 RTK FLOAT</span>}
+          {!isDemo && gnssStatus.source === 'EXTERNAL_GNSS' && gnssStatus.fixType !== 'RTK_FIX' && gnssStatus.fixType !== 'RTK_FLOAT' && <span className="mt-1 block text-[9px] font-bold text-sky-300" data-testid="external-gnss-badge">📡 EXTERNAL</span>}
+        </div>
+        <div className={`${hud} pointer-events-auto max-w-[45%] px-2.5 py-2 text-right`} data-testid="field-hud">
+          <div className="text-[9px] font-bold uppercase tracking-wider text-emerald-300">{isDemo ? 'FIELD DEMO' : 'FIELD'}</div>
+          <div className="max-w-44 truncate text-xs font-black" data-testid={isDemo ? 'demo-field-label' : undefined}>{field?.name || '—'}</div>
+          <div className="max-w-44 truncate text-[9px] text-slate-300">{isDemo ? '🧪 GRANICA ORIENTACYJNA' : cropName || config.treatmentType}</div>
+          <div className="text-[10px] font-bold text-amber-200">{nav.activeLine?.label ?? 'L--'}{stats.totalLines ? ` · ${stats.totalLines} L` : ''}</div>
         </div>
       </div>
 
-      <div className="absolute right-2 top-1/2 -translate-y-1/2 flex flex-col gap-1.5 z-[62]" data-testid="right-map-controls">
-        <button className={`${rnd} !text-xs`} onClick={() => setRightControlsOpen((open) => !open)} aria-label={rightControlsOpen ? 'Zwiń prawe kontrolki mapy' : 'Rozwiń prawe kontrolki mapy'} aria-expanded={rightControlsOpen} title={rightControlsOpen ? 'Zwiń kontrolki mapy' : 'Rozwiń kontrolki mapy'} data-testid="toggle-right-map-controls">
-          {rightControlsOpen ? '×' : '⋮'}
-        </button>
-        {rightControlsOpen && <>
-        {terrain3d && <div className="relative">
+      <div className="absolute right-2 top-1/2 z-[62] flex -translate-y-1/2 flex-col gap-1.5" data-testid="right-map-controls">
+        <div className="relative">
           <button className={`${rnd} !text-[10px]`} onClick={() => setCameraMenu((value) => !value)} data-testid="terrain-camera-menu" aria-label="Tryby kamery">CAM</button>
           {cameraMenu && (
             <div className={`absolute right-14 top-0 ${hud} p-1 w-32`}>
@@ -764,19 +762,20 @@ export default function FieldPilot({ initialFieldId }: { initialFieldId?: string
               ))}
             </div>
           )}
-        </div>}
-        {!terrain3d && <div className="relative">
-          <button className={rnd} onClick={() => setLayerMenu((v) => !v)} data-testid="map-layer-btn">🗺️</button>
+        </div>
+        <div className="relative">
+          <button className={`${rnd} !text-[9px]`} onClick={() => setLayerMenu((value) => !value)} data-testid="map-layer-btn" aria-label="Warstwy mapy">LAYERS</button>
           {layerMenu && (
-            <div className={`absolute right-14 top-0 ${hud} p-1 w-32`}>
-              {LAYERS.map((l) => (
-                <button key={l.id} data-testid={`layer-${l.id}`} onClick={() => { setLayer(l.id); setLayerMenu(false); }} className={`w-full text-left text-xs font-semibold px-2 py-2 rounded-lg ${layer === l.id ? 'bg-emerald-500/20 text-emerald-300' : 'text-slate-200 hover:bg-white/5'}`}>
-                  {l.label}
+            <div className={`absolute right-14 top-0 ${hud} p-1 w-36`} data-testid="layers-drawer">
+              {LAYERS.map((item) => (
+                <button key={item.id} data-testid={`layer-${item.id}`} onClick={() => { setLayer(item.id); setLayerMenu(false); }} className={`w-full min-h-[44px] text-left text-xs font-semibold px-2 py-2 rounded-lg ${layer === item.id ? 'bg-emerald-500/20 text-emerald-300' : 'text-slate-200 hover:bg-white/5'}`}>
+                  {item.label}
                 </button>
               ))}
+              <button onClick={() => { fitCurrentField(); setLayerMenu(false); }} className="w-full min-h-[44px] rounded-lg border-t border-white/10 px-2 text-left text-xs font-bold text-emerald-300" data-testid="map-fit-field">FIT FIELD</button>
             </div>
           )}
-        </div>}
+        </div>
         <button
           className={`${rnd} !text-xs ${terrain3d ? 'ring-2 ring-emerald-400' : ''}`}
           onClick={() => setTerrain3d((value) => !value)}
@@ -787,32 +786,24 @@ export default function FieldPilot({ initialFieldId }: { initialFieldId?: string
         </button>
         <button className={rnd} onClick={() => mapApi.current?.zoomIn()} data-testid="map-zoom-in">+</button>
         <button className={rnd} onClick={() => mapApi.current?.zoomOut()} data-testid="map-zoom-out">−</button>
-        <button className={`${rnd} !text-xs`} onClick={fitCurrentField} data-testid="map-fit-field" title="Dopasuj widok do pola" aria-label="Dopasuj widok do pola">FIT</button>
-        <button className={rnd} onClick={() => mapApi.current?.center()} data-testid="map-center">◎</button>
-        <button className={`${rnd} ${courseUp ? (dark ? 'ring-2 ring-[#ff3b30]' : 'ring-2 ring-emerald-400') : ''}`} onClick={() => terrain3d ? setTerrainCamera(terrainCameraMode === 'course-up' ? 'north-up' : 'course-up') : setCourseUp((v) => !v)} data-testid="map-rotate">🧭</button>
-        <button className={rnd} onClick={toggleFs} data-testid="map-fullscreen">⛶</button>
-        </>}
+        <button className={`${rnd} !text-[9px] ${terminal ? 'ring-1 ring-emerald-400' : ''}`} onClick={() => setTerminal((value) => !value)} data-testid="terminal-toggle" aria-label={terminal ? 'Zamknij terminal' : 'Tryb terminala'} title={terminal ? 'Wyjdź z terminala' : 'Tryb terminala'}>{terminal ? 'EXIT' : 'TERM'}</button>
+        <button className={rnd} onClick={toggleFs} data-testid="map-fullscreen" aria-label="Pełny ekran mapy">⛶</button>
       </div>
 
-      <div className="absolute left-2 top-24 flex flex-col gap-1.5 z-[62]" data-testid="left-map-controls">
-        <button className={`${rnd} !text-xs`} onClick={() => setLeftControlsOpen((open) => !open)} aria-label={leftControlsOpen ? 'Zwiń lewe kontrolki mapy' : 'Rozwiń lewe kontrolki mapy'} aria-expanded={leftControlsOpen} title={leftControlsOpen ? 'Zwiń kontrolki mapy' : 'Rozwiń kontrolki mapy'} data-testid="toggle-left-map-controls">
-          {leftControlsOpen ? '×' : '⋮'}
-        </button>
-        {leftControlsOpen && <>
-        <button data-testid="set-a-btn" onClick={setA} disabled={!fix} className={`w-10 h-10 rounded-xl font-black text-white shadow-lg disabled:opacity-40 ${pointA ? 'bg-emerald-700' : 'bg-emerald-600'}`} title="Ustaw punkt A">A</button>
-        <button data-testid="set-b-btn" onClick={setB} disabled={!fix || !pointA} className={`w-10 h-10 rounded-xl font-black text-white shadow-lg disabled:opacity-40 ${pointB ? 'bg-red-700' : 'bg-red-600'}`} title="Ustaw punkt B">B</button>
+      <div className="absolute left-2 top-24 z-[62] flex flex-col gap-1.5" data-testid="left-map-controls">
+        <button data-testid="set-a-btn" onClick={setA} disabled={!fix} className={`h-11 w-11 rounded-xl font-black text-white shadow-sm disabled:opacity-40 ${pointA ? 'bg-emerald-700/90' : 'border border-white/10 bg-[rgba(5,10,15,0.72)]'}`} title="Ustaw punkt A">A</button>
+        <button data-testid="set-b-btn" onClick={setB} disabled={!fix || !pointA} className={`h-11 w-11 rounded-xl font-black text-white shadow-sm disabled:opacity-40 ${pointB ? 'bg-red-700/90' : 'border border-white/10 bg-[rgba(5,10,15,0.72)]'}`} title="Ustaw punkt B">B</button>
         {isDemo && (
-          <button data-testid="simulate-btn" onClick={startSimulation} className="w-10 h-10 rounded-xl bg-sky-600 text-white text-xl font-black shadow-lg" title="Symuluj przejazd">▶</button>
+          <button data-testid="simulate-btn" onClick={startSimulation} className="h-11 w-11 rounded-xl border border-white/10 bg-sky-700/90 text-xl font-black text-white shadow-sm" title="Symuluj przejazd">▶</button>
         )}
         {manualLabel && (
           <button onClick={() => setManualLabel(null)} className={`${rnd} !text-xs`} data-testid="auto-line-btn">AUTO</button>
         )}
-        </>}
       </div>
 
-      {terrain3d && (
+      {terrain3d && !terminal && (
         <div
-          className={`${hud} pointer-events-none absolute right-16 top-[38%] z-[61] w-36 p-2.5`}
+          className={`${hud} pointer-events-none absolute right-[3.75rem] top-[38%] z-[61] w-32 p-2`}
           aria-label="Legenda nachylenia terenu wyliczonego z danych wysokościowych DEM"
           data-testid="terrain-slope-legend"
         >
@@ -825,22 +816,17 @@ export default function FieldPilot({ initialFieldId }: { initialFieldId?: string
         </div>
       )}
 
-      <div className="absolute left-2 bottom-40 flex flex-col gap-2 z-[61]">
+      {!terminal && <div className="pointer-events-none absolute left-2 bottom-28 z-[61] flex flex-col gap-1">
         {nav.activeLine && (
-          <div className={`${hud} px-3 py-1.5`}>
-            <span className="text-[10px] uppercase opacity-70">Aktywna linia</span>
-            <div className="flex items-center gap-2">
-              <span className={`text-base font-black ${dark ? 'text-[#ff5a52]' : 'text-amber-300'}`}>{nav.activeLine.label}</span>
-              <span className="text-xs tabular-nums">{Math.abs(nav.xte).toFixed(2)} m</span>
-              <span className="text-sm">{nav.steer === 'left' ? '↶' : nav.steer === 'right' ? '↷' : '•'}</span>
-            </div>
-            {nextLine && <div className="text-[10px] opacity-70">NEXT {nextLine.label}</div>}
+          <div className={`${hud} px-2 py-1`}>
+            <span className="text-[9px] font-black">{nav.activeLine.label}</span>
+            {nextLine && <span className="ml-2 text-[9px] opacity-70">NEXT {nextLine.label}</span>}
           </div>
         )}
-        <div className={`${hud} p-2`}>
+        <div className={`${hud} pointer-events-auto p-1.5`}>
           <Compass heading={heading} speed={speedKmh} night={dark} fromGps={!headingFromCompass} />
         </div>
-      </div>
+      </div>}
 
       {nav.distanceToEnd < 40 && nav.distanceToEnd > 0 && (
         <div className={`absolute left-1/2 -translate-x-1/2 top-20 ${hud} px-3 py-1.5 text-sm font-bold`} data-testid="turn-warning">
@@ -848,22 +834,16 @@ export default function FieldPilot({ initialFieldId }: { initialFieldId?: string
         </div>
       )}
 
-      {noGps && (
-        <div className={`absolute left-1/2 top-1/3 -translate-x-1/2 ${hud} p-4 text-center w-72`} data-testid="no-gps">
-          <div className="font-bold text-red-400">🔴 GPS niedostępny</div>
-          {error && <div className="text-xs opacity-80 mt-1">{error}</div>}
-          <button onClick={() => { stopSimTimer(); demoSimulationStartedRef.current = false; setIsDemo(true); }} className="mt-3 min-h-[44px] px-4 rounded-xl bg-sky-600 text-white font-bold w-full">🧪 DEMO</button>
-        </div>
-      )}
+      {noGps && <button onClick={() => { stopSimTimer(); demoSimulationStartedRef.current = false; setIsDemo(true); }} className="absolute left-2 top-40 z-[62] min-h-9 rounded-xl border border-sky-300/30 bg-[rgba(5,10,15,0.78)] px-2.5 text-[10px] font-bold text-sky-200 backdrop-blur-md" data-testid="no-gps-demo-btn">🧪 DEMO</button>}
       {device.needsPermission && !device.granted && !isDemo && (
         <button onClick={device.requestPermission} className={`absolute left-1/2 -translate-x-1/2 top-32 ${hud} px-4 py-2 text-sm font-semibold`} data-testid="compass-permission-btn">
           🧭 Włącz kompas (iOS)
         </button>
       )}
 
-      <div className="absolute left-0 right-0 bottom-0 z-[61]" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
-        {toolsOpen && (
-          <div className={`mx-2 mb-2 ${hud} p-3 space-y-3`} data-testid="tools-drawer">
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-[61]" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
+        {toolsOpen && !terminal && (
+          <div className={`pointer-events-auto mx-2 mb-2 max-h-[55vh] overflow-y-auto ${hud} p-3 space-y-3`} data-testid="tools-drawer">
             <div className="flex flex-wrap items-center gap-2 border-b border-white/10 pb-3">
               <span className="mr-auto text-xs font-semibold">📡 GNSS: {serial.connected ? (serial.snap?.quality === 'rtk-fixed' ? 'RTK FIX' : serial.snap?.quality === 'rtk-float' ? 'RTK FLOAT' : 'POŁĄCZONO') : 'ROZŁĄCZONO'}</span>
               <select
@@ -928,44 +908,30 @@ export default function FieldPilot({ initialFieldId }: { initialFieldId?: string
           </div>
         )}
 
-        <div className={`mx-2 mb-2 ${hud} p-3`}>
+        <div className="pointer-events-none absolute bottom-[5.75rem] left-1/2 w-[min(420px,calc(100vw-5rem))] -translate-x-1/2">
           {lightbar && (
             geometry ? (
-              <>
-                <GuidanceBar info={nav} night={dark} />
-                <div className={`flex justify-between text-[9px] mt-1 px-1 tabular-nums ${dark ? 'text-[#ff5a52]/60' : 'text-slate-400'}`}>
-                  <span>-2</span><span>-1</span><span>-0.5</span><span className="font-black opacity-100">0</span><span>+0.5</span><span>+1</span><span>+2</span>
-                </div>
-              </>
+              <div className={`${hud} px-2 py-1.5`}><GuidanceBar info={nav} night={dark} /></div>
             ) : (
-              <div className="text-center py-2 text-sm font-bold opacity-80">Ustaw A i B (klik na mapie lub przyciski) — linie wygenerują się automatycznie</div>
+              <div className={`${hud} px-2 py-1 text-center text-[10px] font-semibold opacity-80`}>Ustaw A i B — linie wygenerują się automatycznie</div>
             )
-          )}
-          <div className={`h-2 rounded-full overflow-hidden mt-2 ${dark ? 'bg-[#2a0808]' : 'bg-white/10'}`}>
-            <div className="h-full transition-all" style={{ width: `${progressPct}%`, background: dark ? '#ff3b30' : '#10b981' }} />
-          </div>
-          <div className="flex justify-between text-[10px] mt-1 tabular-nums">
-            <span>Pokrycie {Math.round(coverage.coveragePercent)}%{overlap > 0.05 ? ` · ⚠️ NAKŁADKA ${overlap.toFixed(2)} m` : ''}</span>
-            <span>{coverage.areaCoveredHa.toFixed(1)} / {stats.fieldArea.toFixed(1)} ha · {(stats.distance / 1000).toFixed(1)} km</span>
-          </div>
-          {geometry && (
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[9px] mt-1.5 opacity-80">
-              <span className="flex items-center gap-1"><i className={`inline-block w-3 h-1 rounded ${dark ? 'bg-[#ff3b30]' : 'bg-yellow-400'}`} />aktywna</span>
-              <span className="flex items-center gap-1"><i className="inline-block w-3 h-1 rounded" style={{ background: dark ? '#6b7280' : '#94a3b8' }} />wykonane</span>
-              <span className="flex items-center gap-1"><i className="inline-block w-3 h-1 rounded" style={{ background: dark ? '#ff8a80' : '#34d399' }} />pozostałe</span>
-              <span className="flex items-center gap-1"><i className="inline-block w-2 h-2 rounded-full" style={{ background: '#f97316' }} />nakładka</span>
-            </div>
           )}
         </div>
 
-        <div className="mx-2 mb-3 flex gap-2">
-          <button onClick={() => setToolsOpen((v) => !v)} data-testid="tools-btn" className={`${hud} w-14 flex items-center justify-center text-xl`}>⚙</button>
+        <div className="pointer-events-auto mx-2 mb-2 flex items-center justify-between gap-2">
+          <button onClick={() => setToolsOpen((v) => !v)} data-testid="tools-btn" className={`${rnd} !h-10 !w-10 !text-sm`} aria-label="Ustawienia i narzędzia">⚙</button>
+          <div className={`${hud} pointer-events-none flex min-w-0 flex-1 items-center justify-center gap-2 px-2 py-1 text-[9px] tabular-nums sm:max-w-[420px]`}>
+            <span className="font-black">{nav.activeLine?.label ?? 'L--'}</span>
+            <span>{Math.abs(nav.xte).toFixed(2)} m {nav.steer === 'left' ? '←' : nav.steer === 'right' ? '→' : '·'}</span>
+            <span>{speedKmh.toFixed(1)} km/h</span>
+            <span>{Math.round(coverage.coveragePercent)}%</span>
+          </div>
           {!paused ? (
-            <button data-testid="pause-btn" onClick={() => setPaused(true)} className="flex-1 min-h-[56px] rounded-2xl bg-amber-600 text-white text-base font-black shadow-lg">⏸ PAUZA</button>
+            <button data-testid="pause-btn" onClick={() => setPaused(true)} className="h-10 rounded-xl bg-amber-600 px-3 text-xs font-black text-white shadow-sm">⏸</button>
           ) : (
-            <button data-testid="resume-work-btn-bar" onClick={() => setPaused(false)} className="flex-1 min-h-[56px] rounded-2xl bg-emerald-600 text-white text-base font-black shadow-lg">▶ WZNÓW</button>
+            <button data-testid="resume-work-btn-bar" onClick={() => setPaused(false)} className="h-10 rounded-xl bg-emerald-600 px-3 text-xs font-black text-white shadow-sm">▶</button>
           )}
-          <button data-testid="end-work-btn-2" onClick={finishWork} className="flex-1 min-h-[56px] rounded-2xl bg-red-600 text-white text-base font-black shadow-lg">🛑 ZAKOŃCZ</button>
+          <button data-testid="end-work-btn-2" onClick={finishWork} className="h-10 rounded-xl bg-red-600 px-3 text-xs font-black text-white shadow-sm">■</button>
         </div>
       </div>
 

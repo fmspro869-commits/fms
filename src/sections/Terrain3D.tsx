@@ -8,10 +8,14 @@ export default function Terrain3D({
   nav,
   userCenter,
   locationError,
+  locationLoading,
+  requestLocation,
 }: {
   nav: Nav;
   userCenter?: [number, number];
   locationError: string | null;
+  locationLoading: boolean;
+  requestLocation: () => void;
 }) {
   const { state } = useFarm();
   const [fieldId, setFieldId] = useState('');
@@ -47,6 +51,9 @@ export default function Terrain3D({
             ))}
           </select>
         </label>
+        <Btn onClick={requestLocation} disabled={locationLoading} variant="outline">
+          {locationLoading ? '📍 Szukam lokalizacji…' : userCenter ? '📍 Odśwież lokalizację' : '📍 Pobierz moją lokalizację'}
+        </Btn>
         <label className="w-56">
           <span className="mb-1 block text-xs uppercase tracking-wide text-slate-400">
             Wzmocnienie rzeźby: {exaggeration.toFixed(1)}×
@@ -64,7 +71,12 @@ export default function Terrain3D({
         </label>
       </Card>
 
-      <RealisticTerrainMap field={field} center={field ? undefined : userCenter} exaggeration={exaggeration} />
+      <RealisticTerrainMap field={field} center={field ? undefined : userCenter ?? [19, 52]} exaggeration={exaggeration} />
+      {!userCenter && !locationError && (
+        <p className="text-xs text-slate-400" role="status">
+          Widok ogólny Polski — zezwól na lokalizację, aby wyśrodkować mapę na swoim urządzeniu.
+        </p>
+      )}
       <p className="text-xs text-slate-500">
         Mapa wymaga połączenia z internetem. Rzeźba pochodzi z Copernicus DEM GLO-30 udostępnianego przez Microsoft Planetary Computer,
         a obraz satelitarny z Esri. Model DSM o rozdzielczości ok. 30 m może uwzględniać roślinność i zabudowę; nie zastępuje pomiarów terenowych.

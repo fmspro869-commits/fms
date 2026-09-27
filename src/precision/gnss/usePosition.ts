@@ -4,7 +4,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import type { PositionData, GNSSStatus, PositionSource } from './PositionData';
-import { getPhoneProvider, getDemoProvider, getExternalProvider } from './PositionProvider';
+import { getPhoneProvider, getDemoProvider, getExternalProvider, type PositionProvider } from './PositionProvider';
 
 export type ActiveSource = 'AUTO' | PositionSource;
 
@@ -19,6 +19,7 @@ interface UsePositionReturn {
   source: PositionSource;
   isDemo: boolean;
   error: string | null;
+  retry: () => void;
   // Provider access dla specyficznych operacji (np. demo.startSimulation)
   demoProvider: ReturnType<typeof getDemoProvider> | null;
   externalProvider: ReturnType<typeof getExternalProvider> | null;
@@ -40,8 +41,6 @@ export function usePosition({ enabled, preferredSource = 'AUTO' }: UsePositionOp
 
   const unsubPosRef = useRef<(() => void) | null>(null);
   const unsubStatusRef = useRef<(() => void) | null>(null);
-  const activeSourceRef = useRef<PositionSource>('PHONE');
-
   const cleanup = useCallback(() => {
     unsubPosRef.current?.();
     unsubStatusRef.current?.();
@@ -52,7 +51,7 @@ export function usePosition({ enabled, preferredSource = 'AUTO' }: UsePositionOp
   const switchToProvider = useCallback((source: PositionSource) => {
     cleanup();
 
-    let provider;
+    let provider: PositionProvider;
     switch (source) {
       case 'PHONE':
         provider = getPhoneProvider();
@@ -67,8 +66,6 @@ export function usePosition({ enabled, preferredSource = 'AUTO' }: UsePositionOp
         provider = getPhoneProvider();
     }
 
-    activeSourceRef.current = source;
-
     unsubPosRef.current = provider.subscribe((pos) => {
       setPosition(pos);
       setError(null);
@@ -76,10 +73,27 @@ export function usePosition({ enabled, preferredSource = 'AUTO' }: UsePositionOp
 
     unsubStatusRef.current = provider.subscribeStatus((s) => {
       setStatus(s);
+      setError(provider.getError?.() ?? null);
     });
 
     provider.start();
   }, [cleanup]);
+
+  const retry = useCallback(() => {
+    if (!enabled) return;
+    const source = preferredSource === 'AUTO'
+      ? getExternalProvider().isAvailable ? 'EXTERNAL_GNSS' : 'PHONE'
+      : preferredSource;
+    const provider = source === 'PHONE'
+      ? getPhoneProvider()
+      : source === 'EXTERNAL_GNSS'
+        ? getExternalProvider()
+        : getDemoProvider();
+    provider.stop();
+    setPosition(null);
+    setError(null);
+    switchToProvider(source);
+  }, [enabled, preferredSource, switchToProvider]);
 
   useEffect(() => {
     if (!enabled) {
@@ -111,6 +125,7 @@ export function usePosition({ enabled, preferredSource = 'AUTO' }: UsePositionOp
     source: status.source,
     isDemo: status.isDemo,
     error,
+    retry,
     demoProvider: getDemoProvider(),
     externalProvider: getExternalProvider(),
   };

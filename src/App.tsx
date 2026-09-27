@@ -54,7 +54,7 @@ const MOBILE_TABS = ['dashboard', 'gis', 'dziennik', 'magazyn', 'menu'];
 
 function Shell() {
   const { state, toast, switchFarm, notify, addField, addTask, addWarehouseItem, addMachine, addTreatment, setFieldCrop } = useFarm();
-  const { center: userCenter, error: locationError } = useInitialLocation();
+  const { center: userCenter, error: locationError, loading: locationLoading, requestLocation } = useInitialLocation();
   const [section, setSection] = useState(() => location.hash.replace('#', '') || 'dashboard');
   const [focusId, setFocusId] = useState<string | undefined>();
   const [mobileMenu, setMobileMenu] = useState(false);
@@ -259,7 +259,13 @@ function Shell() {
           {section === 'polowa' && <FieldPilot initialFieldId={focusId} />}
           {section === 'teren3d' && (
             <Suspense fallback={<div className="py-12 text-center text-sm text-slate-400">Ładowanie mapy 3D…</div>}>
-              <Terrain3D nav={nav} userCenter={userCenter ?? undefined} locationError={locationError} />
+              <Terrain3D
+                nav={nav}
+                userCenter={userCenter ?? undefined}
+                locationError={locationError}
+                locationLoading={locationLoading}
+                requestLocation={requestLocation}
+              />
             </Suspense>
           )}
           {section === 'magazyn' && <Warehouse />}

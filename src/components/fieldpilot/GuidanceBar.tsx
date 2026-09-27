@@ -1,12 +1,5 @@
 import type { GuidanceInfo } from '@/hooks/useFieldGuidance';
 
-const QUALITY_LABEL: Record<string, string> = {
-  ideal: 'IDEALNIE',
-  good: 'DOBRZE',
-  correct: 'KOREKTA',
-  large: 'DUŻA KOREKTA',
-};
-
 export function GuidanceBar({ info, night }: { info: GuidanceInfo; night: boolean }) {
   const { xte, steer, quality, activeLine } = info;
   const cells = 11;
@@ -26,21 +19,12 @@ export function GuidanceBar({ info, night }: { info: GuidanceInfo; night: boolea
   const qText = night ? 'text-[#ff5a52]' : quality === 'ideal' ? 'text-emerald-400' : quality === 'good' ? 'text-lime-400' : quality === 'correct' ? 'text-amber-400' : 'text-red-400';
 
   return (
-    <div className="w-full select-none" data-testid="guidance-lightbar">
-      {/* strzałki kierunku korekty */}
-      <div className="flex items-center justify-between px-1 mb-2">
-        <div className={`text-3xl sm:text-4xl font-black transition-opacity ${steer === 'left' ? (night ? 'text-[#ff3b30] opacity-100' : 'text-emerald-400 opacity-100') : 'opacity-15'}`}>←</div>
-        <div className={`text-center ${qText}`}>
-          <div className="text-4xl sm:text-6xl font-black tabular-nums leading-none" data-testid="xte-value">
-            {xte >= 0 ? '+' : ''}{xte.toFixed(2)}<span className="text-xl sm:text-2xl"> m</span>
-          </div>
-          <div className="text-xs sm:text-sm font-bold tracking-widest mt-1">{QUALITY_LABEL[quality]}</div>
-        </div>
-        <div className={`text-3xl sm:text-4xl font-black transition-opacity ${steer === 'right' ? (night ? 'text-[#ff3b30] opacity-100' : 'text-emerald-400 opacity-100') : 'opacity-15'}`}>→</div>
-      </div>
-
-      {/* pasek świetlny */}
-      <div className="flex items-center gap-1 sm:gap-1.5 justify-center">
+    <div className="flex w-full select-none items-center gap-2" data-testid="guidance-lightbar" aria-label={`Odchylenie ${Math.abs(xte).toFixed(2)} m, ${steer === 'left' ? 'w lewo' : steer === 'right' ? 'w prawo' : 'na linii'}`}>
+      <span className={`w-10 shrink-0 text-right text-xs font-bold tabular-nums ${xte > 0.05 ? (Math.abs(xte) >= 1 ? 'text-red-400' : 'text-amber-300') : xte < -0.05 ? (Math.abs(xte) >= 1 ? 'text-red-400' : 'text-amber-300') : qText}`} data-testid="xte-value">
+        {Math.abs(xte).toFixed(2)} m
+      </span>
+      <div className="flex min-w-0 flex-1 items-center justify-center gap-1" aria-hidden="true">
+        <span className={`text-xs font-black ${steer === 'left' ? (Math.abs(xte) >= 1 ? 'text-red-400' : 'text-amber-300') : 'text-white/20'}`}>◀</span>
         {Array.from({ length: cells }).map((_, i) => {
           const dist = Math.abs(i - center);
           const active = i === dotIndex || (dotIndex > center && i > center && i <= dotIndex) || (dotIndex < center && i < center && i >= dotIndex) || (dotIndex === center && i === center);
@@ -48,17 +32,13 @@ export function GuidanceBar({ info, night }: { info: GuidanceInfo; night: boolea
           return (
             <div
               key={i}
-              className={`h-8 sm:h-12 flex-1 max-w-[42px] rounded-sm transition-colors duration-150 ${qColor(active, dist)} ${isCenterCell ? (night ? 'ring-1 ring-[#ff5a52]/60' : 'ring-1 ring-emerald-300/60') : ''}`}
+              className={`h-2.5 min-w-1 flex-1 max-w-7 rounded-full transition-colors duration-150 ${qColor(active, dist)} ${isCenterCell ? (night ? 'ring-1 ring-[#ff5a52]/60' : 'ring-1 ring-emerald-300/60') : ''}`}
             />
           );
         })}
+        <span className={`text-xs font-black ${steer === 'right' ? (Math.abs(xte) >= 1 ? 'text-red-400' : 'text-amber-300') : 'text-white/20'}`}>▶</span>
       </div>
-
-      <div className="flex items-center justify-between mt-2 px-1 text-[11px] sm:text-xs font-semibold uppercase tracking-wide">
-        <span className={steer === 'left' ? qText : 'opacity-40'}>← Skręć w lewo</span>
-        <span className={night ? 'text-[#ff5a52]/70' : 'text-slate-400'}>{activeLine ? activeLine.label : '—'}</span>
-        <span className={steer === 'right' ? qText : 'opacity-40'}>Skręć w prawo →</span>
-      </div>
+      <span className={`w-12 shrink-0 text-[9px] font-bold uppercase tracking-wide ${night ? 'text-[#ff5a52]/70' : 'text-slate-400'}`}>{activeLine?.label ?? 'CENTER'}</span>
     </div>
   );
 }
