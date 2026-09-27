@@ -1,5 +1,5 @@
 // FMS Precision 3.0 — Service Worker (offline shell)
-const CACHE = 'fms-precision-v5';
+const CACHE = 'fms-precision-v6';
 
 self.addEventListener('install', () => self.skipWaiting());
 
@@ -15,6 +15,11 @@ self.addEventListener('fetch', (e) => {
   const url = new URL(req.url);
   // Nie buforuj żądań cross-origin (kafelki map, Open-Meteo) — sieć bezpośrednio.
   if (url.origin !== self.location.origin) return;
+  // Vite modules are hot-reloaded source files, not stable offline assets.
+  if (url.pathname.startsWith('/src/') || url.pathname.startsWith('/@') || url.pathname.startsWith('/node_modules/')) {
+    e.respondWith(fetch(req));
+    return;
+  }
 
   if (req.mode === 'navigate') {
     e.respondWith(

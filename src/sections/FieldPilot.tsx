@@ -28,6 +28,7 @@ import { GuidanceBar } from '@/components/fieldpilot/GuidanceBar';
 import { Compass } from '@/components/fieldpilot/Compass';
 import { NavigationMap, type MapHandle, type MapLayer } from '@/components/fieldpilot/NavigationMap';
 import { RealisticTerrainMap } from '@/components/terrain/RealisticTerrainMap';
+import { FieldPilot3DNavigation } from '@/components/3d/FieldPilot3DNavigation';
 import { SessionSummary } from '@/components/fieldpilot/SessionSummary';
 import { SessionHistory } from '@/components/fieldpilot/SessionHistory';
 import { StartConfig, type PilotConfig } from '@/components/fieldpilot/StartConfig';
@@ -136,6 +137,7 @@ export default function FieldPilot({ initialFieldId }: { initialFieldId?: string
   const [layer, setLayer] = useState<MapLayer>('satellite');
   const [courseUp, setCourseUp] = useState(false);
   const [terrain3d, setTerrain3d] = useState(false);
+  const [nav3d, setNav3d] = useState(false);
   const [terrainCameraMode, setTerrainCameraMode] = useState<'follow' | 'free' | 'north-up' | 'course-up' | 'top-down'>('follow');
   const [terrainReadout, setTerrainReadout] = useState<{ elevation: number | null; slopePercent: number | null }>({ elevation: null, slopePercent: null });
   const [toolsOpen, setToolsOpen] = useState(false);
@@ -222,6 +224,10 @@ export default function FieldPilot({ initialFieldId }: { initialFieldId?: string
 
   const swaths = useMemo(() => buildSwathQuads(track.map((p) => ({ lat: p.lat, lng: p.lng })), config.width), [track, config.width]);
   const trackCoordinates = useMemo(() => track.map((p) => [p.lat, p.lng] as [number, number]), [track]);
+  const guidanceLines3d = useMemo(
+    () => geometry?.lines.map((line) => ({ label: line.label, segments: line.segments })) ?? [],
+    [geometry],
+  );
 
   const doneLabels = useMemo(() => {
     if (!geometry) return [];
@@ -372,6 +378,7 @@ export default function FieldPilot({ initialFieldId }: { initialFieldId?: string
     (demo: boolean) => {
       setIsDemo(demo);
       setTerrain3d(true);
+      setNav3d(false);
       demoSimulationStartedRef.current = false;
       setTrack([]);
       setContour([]);
@@ -662,7 +669,34 @@ export default function FieldPilot({ initialFieldId }: { initialFieldId?: string
       data-testid="pilot-running"
     >
       <div className="absolute inset-0">
-        {terrain3d ? (
+        {nav3d ? (
+          <FieldPilot3DNavigation
+            position={fix ? { lat: fix.lat, lng: fix.lng, heading } : null}
+            track={trackCoordinates}
+            fieldGeo={polygon}
+            guidanceLines={guidanceLines3d}
+            activeLabel={nav.activeLine?.label ?? null}
+            doneLabels={doneLabels}
+            info={{
+              activeLine: nav.activeLine ? { label: nav.activeLine.label } : null,
+              xte: nav.xte,
+              steer: nav.steer,
+              distanceToEnd: nav.distanceToEnd,
+            }}
+            implementWidth={config.width}
+            heading={heading}
+            speedKmh={speedKmh}
+            isDemo={isDemo}
+            night={dark}
+            accuracyM={fix?.accuracy ?? null}
+            satellites={position?.satellites ?? null}
+            fixLabel={noGps ? 'NO GPS' : gnssStatus.fixType}
+            paused={paused}
+            onTogglePause={() => setPaused((value) => !value)}
+            onStop={finishWork}
+            onOpenMap={() => { setNav3d(false); setTerrain3d(true); }}
+          />
+        ) : terrain3d ? (
           <RealisticTerrainMap
             ref={mapApi}
             field={field}
@@ -718,7 +752,7 @@ export default function FieldPilot({ initialFieldId }: { initialFieldId?: string
         )}
       </div>
 
-      <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between gap-2 p-2" style={{ paddingTop: 'calc(env(safe-area-inset-top) + 8px)' }}>
+      {!nav3d && <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between gap-2 p-2" style={{ paddingTop: 'calc(env(safe-area-inset-top) + 8px)' }}>
         <div className={`${hud} pointer-events-auto max-w-[190px] px-2.5 py-2 text-[10px] leading-tight sm:max-w-[210px]`} data-testid="gps-hud">
           <div className="flex items-center gap-1.5 font-black tracking-wide" data-testid="hud-gps">
             <span>{isDemo ? '🧪 DEMO' : `${gpsDot} ${gnssStatus.fixType === 'NONE' ? 'NO GPS' : gnssStatus.fixType}`}</span>
@@ -742,10 +776,10 @@ export default function FieldPilot({ initialFieldId }: { initialFieldId?: string
           <div className="max-w-44 truncate text-[9px] text-slate-300">{isDemo ? '🧪 GRANICA ORIENTACYJNA' : cropName || config.treatmentType}</div>
           <div className="text-[10px] font-bold text-amber-200">{nav.activeLine?.label ?? 'L--'}{stats.totalLines ? ` · ${stats.totalLines} L` : ''}</div>
         </div>
-      </div>
+      </div>}
 
       <div className="absolute right-2 top-1/2 z-[62] flex -translate-y-1/2 flex-col gap-1.5" data-testid="right-map-controls">
-        <div className="relative">
+        {terrain3d && !nav3d && <div className="relative">
           <button className={`${rnd} !text-[10px]`} onClick={() => setCameraMenu((value) => !value)} data-testid="terrain-camera-menu" aria-label="Tryby kamery">CAM</button>
           {cameraMenu && (
             <div className={`absolute right-14 top-0 ${hud} p-1 w-32`}>
@@ -762,8 +796,8 @@ export default function FieldPilot({ initialFieldId }: { initialFieldId?: string
               ))}
             </div>
           )}
-        </div>
-        <div className="relative">
+        </div>}
+        {!terrain3d && !nav3d && <div className="relative">
           <button className={`${rnd} !text-[9px]`} onClick={() => setLayerMenu((value) => !value)} data-testid="map-layer-btn" aria-label="Warstwy mapy">LAYERS</button>
           {layerMenu && (
             <div className={`absolute right-14 top-0 ${hud} p-1 w-36`} data-testid="layers-drawer">
@@ -775,17 +809,29 @@ export default function FieldPilot({ initialFieldId }: { initialFieldId?: string
               <button onClick={() => { fitCurrentField(); setLayerMenu(false); }} className="w-full min-h-[44px] rounded-lg border-t border-white/10 px-2 text-left text-xs font-bold text-emerald-300" data-testid="map-fit-field">FIT FIELD</button>
             </div>
           )}
-        </div>
+        </div>}
         <button
           className={`${rnd} !text-xs ${terrain3d ? 'ring-2 ring-emerald-400' : ''}`}
-          onClick={() => setTerrain3d((value) => !value)}
+          onClick={() => {
+            if (nav3d) {
+              setNav3d(false);
+              setTerrain3d(false);
+            } else if (terrain3d) {
+              setTerrain3d(false);
+              setNav3d(true);
+            } else {
+              setTerrain3d(true);
+            }
+          }}
           data-testid="map-3d-toggle"
-          title={terrain3d ? 'Przełącz na mapę 2D' : 'Przełącz na mapę terenu 3D'}
+          title={nav3d ? 'Przełącz na mapę 2D' : terrain3d ? 'Otwórz widok 3D ciągnika' : 'Przełącz na mapę terenu 3D'}
         >
-          {terrain3d ? '2D' : '3D'}
+          {nav3d ? '2D' : terrain3d ? 'TRACTOR' : '3D'}
         </button>
-        <button className={rnd} onClick={() => mapApi.current?.zoomIn()} data-testid="map-zoom-in">+</button>
-        <button className={rnd} onClick={() => mapApi.current?.zoomOut()} data-testid="map-zoom-out">−</button>
+        {!nav3d && <>
+          <button className={rnd} onClick={() => mapApi.current?.zoomIn()} data-testid="map-zoom-in">+</button>
+          <button className={rnd} onClick={() => mapApi.current?.zoomOut()} data-testid="map-zoom-out">−</button>
+        </>}
         <button className={`${rnd} !text-[9px] ${terminal ? 'ring-1 ring-emerald-400' : ''}`} onClick={() => setTerminal((value) => !value)} data-testid="terminal-toggle" aria-label={terminal ? 'Zamknij terminal' : 'Tryb terminala'} title={terminal ? 'Wyjdź z terminala' : 'Tryb terminala'}>{terminal ? 'EXIT' : 'TERM'}</button>
         <button className={rnd} onClick={toggleFs} data-testid="map-fullscreen" aria-label="Pełny ekran mapy">⛶</button>
       </div>
@@ -801,7 +847,7 @@ export default function FieldPilot({ initialFieldId }: { initialFieldId?: string
         )}
       </div>
 
-      {terrain3d && !terminal && (
+      {terrain3d && !nav3d && !terminal && (
         <div
           className={`${hud} pointer-events-none absolute right-[3.75rem] top-[38%] z-[61] w-32 p-2`}
           aria-label="Legenda nachylenia terenu wyliczonego z danych wysokościowych DEM"
@@ -816,7 +862,7 @@ export default function FieldPilot({ initialFieldId }: { initialFieldId?: string
         </div>
       )}
 
-      {!terminal && <div className="pointer-events-none absolute left-2 bottom-28 z-[61] flex flex-col gap-1">
+      {!terminal && !nav3d && <div className="pointer-events-none absolute left-2 bottom-28 z-[61] flex flex-col gap-1">
         {nav.activeLine && (
           <div className={`${hud} px-2 py-1`}>
             <span className="text-[9px] font-black">{nav.activeLine.label}</span>
@@ -828,14 +874,14 @@ export default function FieldPilot({ initialFieldId }: { initialFieldId?: string
         </div>
       </div>}
 
-      {nav.distanceToEnd < 40 && nav.distanceToEnd > 0 && (
+      {!nav3d && nav.distanceToEnd < 40 && nav.distanceToEnd > 0 && (
         <div className={`absolute left-1/2 -translate-x-1/2 top-20 ${hud} px-3 py-1.5 text-sm font-bold`} data-testid="turn-warning">
           KONIEC LINII ZA {Math.round(nav.distanceToEnd)} m · ↶ NAWRÓT
         </div>
       )}
 
       {noGps && <button onClick={() => { stopSimTimer(); demoSimulationStartedRef.current = false; setIsDemo(true); }} className="absolute left-2 top-40 z-[62] min-h-9 rounded-xl border border-sky-300/30 bg-[rgba(5,10,15,0.78)] px-2.5 text-[10px] font-bold text-sky-200 backdrop-blur-md" data-testid="no-gps-demo-btn">🧪 DEMO</button>}
-      {device.needsPermission && !device.granted && !isDemo && (
+      {!nav3d && device.needsPermission && !device.granted && !isDemo && (
         <button onClick={device.requestPermission} className={`absolute left-1/2 -translate-x-1/2 top-32 ${hud} px-4 py-2 text-sm font-semibold`} data-testid="compass-permission-btn">
           🧭 Włącz kompas (iOS)
         </button>
@@ -908,7 +954,7 @@ export default function FieldPilot({ initialFieldId }: { initialFieldId?: string
           </div>
         )}
 
-        <div className="pointer-events-none absolute bottom-[5.75rem] left-1/2 w-[min(420px,calc(100vw-5rem))] -translate-x-1/2">
+        {!nav3d && <div className="pointer-events-none absolute bottom-[5.75rem] left-1/2 w-[min(420px,calc(100vw-5rem))] -translate-x-1/2">
           {lightbar && (
             geometry ? (
               <div className={`${hud} px-2 py-1.5`}><GuidanceBar info={nav} night={dark} /></div>
@@ -916,22 +962,24 @@ export default function FieldPilot({ initialFieldId }: { initialFieldId?: string
               <div className={`${hud} px-2 py-1 text-center text-[10px] font-semibold opacity-80`}>Ustaw A i B — linie wygenerują się automatycznie</div>
             )
           )}
-        </div>
+        </div>}
 
         <div className="pointer-events-auto mx-2 mb-2 flex items-center justify-between gap-2">
           <button onClick={() => setToolsOpen((v) => !v)} data-testid="tools-btn" className={`${rnd} !h-10 !w-10 !text-sm`} aria-label="Ustawienia i narzędzia">⚙</button>
-          <div className={`${hud} pointer-events-none flex min-w-0 flex-1 items-center justify-center gap-2 px-2 py-1 text-[9px] tabular-nums sm:max-w-[420px]`}>
-            <span className="font-black">{nav.activeLine?.label ?? 'L--'}</span>
-            <span>{Math.abs(nav.xte).toFixed(2)} m {nav.steer === 'left' ? '←' : nav.steer === 'right' ? '→' : '·'}</span>
-            <span>{speedKmh.toFixed(1)} km/h</span>
-            <span>{Math.round(coverage.coveragePercent)}%</span>
-          </div>
-          {!paused ? (
-            <button data-testid="pause-btn" onClick={() => setPaused(true)} className="h-10 rounded-xl bg-amber-600 px-3 text-xs font-black text-white shadow-sm">⏸</button>
-          ) : (
-            <button data-testid="resume-work-btn-bar" onClick={() => setPaused(false)} className="h-10 rounded-xl bg-emerald-600 px-3 text-xs font-black text-white shadow-sm">▶</button>
-          )}
-          <button data-testid="end-work-btn-2" onClick={finishWork} className="h-10 rounded-xl bg-red-600 px-3 text-xs font-black text-white shadow-sm">■</button>
+          {!nav3d && <>
+            <div className={`${hud} pointer-events-none flex min-w-0 flex-1 items-center justify-center gap-2 px-2 py-1 text-[9px] tabular-nums sm:max-w-[420px]`}>
+              <span className="font-black">{nav.activeLine?.label ?? 'L--'}</span>
+              <span>{Math.abs(nav.xte).toFixed(2)} m {nav.steer === 'left' ? '←' : nav.steer === 'right' ? '→' : '·'}</span>
+              <span>{speedKmh.toFixed(1)} km/h</span>
+              <span>{Math.round(coverage.coveragePercent)}%</span>
+            </div>
+            {!paused ? (
+              <button data-testid="pause-btn" onClick={() => setPaused(true)} className="h-10 rounded-xl bg-amber-600 px-3 text-xs font-black text-white shadow-sm">⏸</button>
+            ) : (
+              <button data-testid="resume-work-btn-bar" onClick={() => setPaused(false)} className="h-10 rounded-xl bg-emerald-600 px-3 text-xs font-black text-white shadow-sm">▶</button>
+            )}
+            <button data-testid="end-work-btn-2" onClick={finishWork} className="h-10 rounded-xl bg-red-600 px-3 text-xs font-black text-white shadow-sm">■</button>
+          </>}
         </div>
       </div>
 
