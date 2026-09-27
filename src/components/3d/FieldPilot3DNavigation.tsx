@@ -1,4 +1,4 @@
-import React, { useRef, useMemo, useState, useEffect } from 'react';
+import React, { useRef, useMemo } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { OrbitControls, PerspectiveCamera, Sky } from '@react-three/drei';
 import * as THREE from 'three';
@@ -38,7 +38,7 @@ const convertGpsToLocalMeters = (lat: number, lng: number, refLat: number, refLn
   };
 };
 
-// Ostra, dynamiczna struktura gleby pola
+// Struktura gleby pola
 const HighResFieldTerrain = () => {
   return (
     <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow position={[0, 0, 0]}>
@@ -52,7 +52,7 @@ const HighResFieldTerrain = () => {
   );
 };
 
-// Realistyczny model ciągnika 3D
+// Model ciągnika 3D
 const ProfessionalTractor = ({ implementWidth = 6 }: { implementWidth?: number }) => {
   return (
     <group>
@@ -66,21 +66,21 @@ const ProfessionalTractor = ({ implementWidth = 6 }: { implementWidth?: number }
         <boxGeometry args={[1.5, 1.3, 1.4]} />
         <meshStandardMaterial color="#1e293b" roughness={0.1} transparent opacity={0.75} />
       </mesh>
-      {/* Dwa duże tylne koła */}
+      {/* Tylne koła */}
       {[-1.0, 1.0].map((x, i) => (
         <mesh key={i} position={[x, 0.9, -0.5]} rotation={[0, 0, Math.PI / 2]}>
           <cylinderGeometry args={[0.85, 0.85, 0.5, 24]} />
           <meshStandardMaterial color="#0f172a" roughness={0.8} />
         </mesh>
       ))}
-      {/* Dwa przednie koła */}
+      {/* Przednie koła */}
       {[-0.9, 0.9].map((x, i) => (
         <mesh key={i} position={[x, 0.55, 1.4]} rotation={[0, 0, Math.PI / 2]}>
           <cylinderGeometry args={[0.55, 0.55, 0.4, 20]} />
           <meshStandardMaterial color="#0f172a" roughness={0.8} />
         </mesh>
       ))}
-      {/* Belka narzędzia / Maszyny z tyłu */}
+      {/* Maszyna z tyłu */}
       <mesh position={[0, 0.5, -2.2]}>
         <boxGeometry args={[implementWidth, 0.25, 0.4]} />
         <meshStandardMaterial color="#ef4444" metalness={0.5} />
@@ -89,7 +89,7 @@ const ProfessionalTractor = ({ implementWidth = 6 }: { implementWidth?: number }
   );
 };
 
-// Świecąca, trójwymiarowa linia przejazdu AB
+// Trójwymiarowa linia przejazdu AB
 const Guideline3D = ({ xte = 0 }: { xte?: number }) => {
   return (
     <mesh position={[xte, 0.05, -50]} rotation={[-Math.PI / 2, 0, 0]}>
@@ -105,8 +105,6 @@ export const FieldPilot3DNavigation: React.FC<FieldPilot3DProps> = ({
   info,
   implementWidth = 6,
   heading = 0,
-  speedKmh = 0,
-  isDemo = false,
 }) => {
   const tractorGroupRef = useRef<THREE.Group>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera>(null);
@@ -115,21 +113,20 @@ export const FieldPilot3DNavigation: React.FC<FieldPilot3DProps> = ({
     if (position) return { lat: position.lat, lng: position.lng };
     if (track.length > 0) return { lat: track[0][0], lng: track[0][1] };
     return { lat: 52.2297, lng: 21.0122 };
-  }, []);
+  }, [position, track]);
 
   useFrame(() => {
     if (position && tractorGroupRef.current && cameraRef.current) {
       const { x, z } = convertGpsToLocalMeters(position.lat, position.lng, refPos.lat, refPos.lng);
       
-      // Ustawienie pozycji ciągnika
       tractorGroupRef.current.position.set(x, 0, z);
       
       const radHeading = -((heading ?? 0) * Math.PI) / 180;
       tractorGroupRef.current.rotation.y = radHeading;
 
-      // Dynamiczna kamera podążająca TUŻ ZA KABINĄ (Perspektywa TPV)
-      const camOffsetDistance = 9; // Metry za ciągnikiem
-      const camHeight = 4.5;       // Wysokość nad ziemią
+      // Kamera TPV podążająca za ciągnikiem
+      const camOffsetDistance = 9;
+      const camHeight = 4.5;
 
       const camX = x + Math.sin(radHeading) * camOffsetDistance;
       const camZ = z + Math.cos(radHeading) * camOffsetDistance;
@@ -145,18 +142,13 @@ export const FieldPilot3DNavigation: React.FC<FieldPilot3DProps> = ({
         <PerspectiveCamera ref={cameraRef} makeDefault position={[0, 5, 10]} fov={60} />
         <OrbitControls enablePan={false} maxPolarAngle={Math.PI / 2.1} minDistance={3} maxDistance={25} />
         
-        {/* Realistyczne oświetlenie ze słońcem */}
         <Sky sunPosition={[100, 30, 100]} inclination={0.2} azimuth={0.25} />
         <ambientLight intensity={0.7} />
         <directionalLight position={[50, 40, 20]} intensity={1.5} castShadow />
 
-        {/* Podłoże pola */}
         <HighResFieldTerrain />
-
-        {/* Aktywna linia AB w 3D */}
         <Guideline3D xte={info?.xte || 0} />
 
-        {/* Ciągnik w podążającej grupie */}
         <group ref={tractorGroupRef}>
           <ProfessionalTractor implementWidth={implementWidth} />
         </group>
