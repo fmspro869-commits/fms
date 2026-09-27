@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFarm } from '@/store/FarmContext';
-import type { FieldWorkSession, TrackPoint } from '@/types';
+import type { Field, FieldWorkSession, TrackPoint } from '@/types';
 import {
   bearing,
   buildSwathQuads,
@@ -52,6 +52,25 @@ interface Snapshot {
 
 const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
 const defaultConfig: PilotConfig = { fieldId: '', treatmentType: 'siew', tractorId: '', machineId: '', width: 3, mode: 'AB', operator: '', passes: 1, accuracyPref: 'auto' };
+const DEMO_FIELD_GEO: [number, number][] = [
+  [51.00105, 17.1355],
+  [51.0013, 17.13642],
+  [51.00215, 17.13628],
+  [51.00192, 17.13534],
+];
+const DEMO_FIELD: Field = {
+  id: '__demo-sulimow-example__',
+  name: 'DEMO — Sulimów (granica orientacyjna)',
+  area: polygonAreaHa(DEMO_FIELD_GEO),
+  parcelNo: 'DEMO',
+  district: 'Sulimów',
+  soilType: '—',
+  pH: 0,
+  P: '—',
+  K: '—',
+  Mg: '—',
+  geo: DEMO_FIELD_GEO,
+};
 
 function isValidCoordinatePair(point: unknown): point is [number, number] {
   return Array.isArray(point)
@@ -122,13 +141,15 @@ export default function FieldPilot({ initialFieldId }: { initialFieldId?: string
   const [toolsOpen, setToolsOpen] = useState(false);
   const [layerMenu, setLayerMenu] = useState(false);
   const [cameraMenu, setCameraMenu] = useState(false);
+  const [leftControlsOpen, setLeftControlsOpen] = useState(true);
+  const [rightControlsOpen, setRightControlsOpen] = useState(true);
   const [manualLabel, setManualLabel] = useState<string | null>(null);
   const demoSimulationStartedRef = useRef(false);
   const mapApi = useRef<MapHandle>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const serial = useSerialNmea();
 
-  const field = state.fields.find((f) => f.id === config.fieldId);
+  const field = isDemo ? DEMO_FIELD : state.fields.find((f) => f.id === config.fieldId);
   const device = useDeviceHeading(phase === 'running' && !isDemo);
   const speech = useSpeechAlerts(voice);
   const wake = useWakeLock();
@@ -452,11 +473,11 @@ export default function FieldPilot({ initialFieldId }: { initialFieldId?: string
     const avgSpeed = elapsed > 0 ? (distance / elapsed) * 3.6 : 0;
     const accs = track.filter((p) => p.accuracy > 0).map((p) => p.accuracy);
     const avgAccuracy = accs.length ? accs.reduce((a, b) => a + b, 0) / accs.length : 0;
-    const fc = state.fieldCrops.find((c) => c.fieldId === config.fieldId && c.season === 2026);
-    const crop = fc?.cropName || '—';
+    const fc = isDemo ? undefined : state.fieldCrops.find((c) => c.fieldId === config.fieldId && c.season === 2026);
+    const crop = isDemo ? '— (DEMO)' : fc?.cropName || '—';
     const session: FieldWorkSession = {
       id: uid(),
-      fieldId: config.fieldId,
+      fieldId: isDemo ? DEMO_FIELD.id : config.fieldId,
       fieldName: field?.name || '—',
       tractorId: config.tractorId || undefined,
       machineId: config.machineId || undefined,
@@ -483,8 +504,8 @@ export default function FieldPilot({ initialFieldId }: { initialFieldId?: string
       status: 'completed',
       isDemo,
     };
-    addSession(session);
-    if (config.fieldId) {
+    if (!isDemo) addSession(session);
+    if (!isDemo && config.fieldId) {
       const hhmm = `${String(Math.floor(elapsed / 3600)).padStart(2, '0')}:${String(Math.floor((elapsed % 3600) / 60)).padStart(2, '0')}`;
       addTreatment({
         date: startedAt.slice(0, 10),
@@ -505,7 +526,7 @@ export default function FieldPilot({ initialFieldId }: { initialFieldId?: string
     }
     setLastSession(session);
     setPhase('summary');
-    notify('Praca zapisana w Dzienniku Polowym ✅');
+    notify(isDemo ? 'Sesja DEMO zakończona — dane gospodarstwa nie zostały zmienione' : 'Praca zapisana w Dzienniku Polowym ✅');
   }, [track, startedAt, coverage, config, field, pointA, pointB, shift, offsetCorr, contour, geometry, isDemo, state.fieldCrops, addSession, addTreatment, notify, stopSimTimer]);
 
   const resumeSession = () => {
@@ -591,7 +612,7 @@ export default function FieldPilot({ initialFieldId }: { initialFieldId?: string
   }
 
   const dark = night || terminal;
-  const fieldCrop = state.fieldCrops.find((c) => c.fieldId === config.fieldId && c.season === 2026);
+  const fieldCrop = isDemo ? undefined : state.fieldCrops.find((c) => c.fieldId === config.fieldId && c.season === 2026);
   const cropName = fieldCrop?.cropName || '';
   const noGps = !isDemo && !position;
   const nextLine = nav.activeLine && geometry ? geometry.lines[nav.activeIndex] : undefined;
@@ -603,7 +624,7 @@ export default function FieldPilot({ initialFieldId }: { initialFieldId?: string
     : gnssStatus.fixType === 'GNSS' ? '🔵'
     : acc <= 5 ? '🟢' : acc <= 10 ? '🟡' : '🔴';
   const toggleCls = (on: boolean) => (on ? (dark ? 'bg-[#ff3b30]' : 'bg-emerald-500') : 'bg-slate-600');
-  const rnd = `w-12 h-12 flex items-center justify-center rounded-2xl backdrop-blur-md border text-lg font-bold shadow-lg active:scale-90 transition-transform ${dark ? 'bg-black/60 border-[#ff3b30]/30' : 'bg-slate-900/60 border-white/10'}`;
+  const rnd = `w-10 h-10 flex items-center justify-center rounded-xl backdrop-blur-md border text-lg font-bold shadow-lg active:scale-90 transition-transform ${dark ? 'bg-black/60 border-[#ff3b30]/30' : 'bg-slate-900/60 border-white/10'}`;
   const hud = `rounded-2xl border backdrop-blur-md shadow-xl ${dark ? 'bg-black/70 border-[#ff3b30]/30 text-[#ff5a52]' : 'bg-slate-900/65 border-white/10 text-white'}`;
   const LAYERS: { id: MapLayer; label: string }[] = [
     { id: 'map', label: '🗺️ Mapa' },
@@ -623,6 +644,14 @@ export default function FieldPilot({ initialFieldId }: { initialFieldId?: string
     setFollow(mode !== 'free');
     setCourseUp(mode === 'course-up');
     setCameraMenu(false);
+  };
+  const fitCurrentField = () => {
+    if (terrain3d) setTerrainCamera('free');
+    else {
+      setFollow(false);
+      setCourseUp(false);
+    }
+    mapApi.current?.fitField();
   };
 
   return (
@@ -692,8 +721,8 @@ export default function FieldPilot({ initialFieldId }: { initialFieldId?: string
       <div className="absolute left-0 right-0 top-0 flex items-start justify-between gap-2 p-2" style={{ paddingTop: 'calc(env(safe-area-inset-top) + 8px)' }}>
         <div className={`${hud} px-3 py-2 max-w-[52%]`}>
           <div className={`text-[11px] font-black tracking-wide ${dark ? 'text-[#ff5a52]' : 'text-emerald-400'}`}>🚜 FMS FIELD PILOT</div>
-          <div className="text-sm font-bold leading-tight truncate">{field?.name || '—'}</div>
-          <div className={`text-[10px] ${dark ? 'text-[#ff5a52]/70' : 'text-slate-300'}`}>{cropName ? `${cropName}${fieldCrop ? ` · BBCH ${fieldCrop.bbch}` : ''} · ` : ''}{config.treatmentType} · {config.width.toFixed(2)} m</div>
+          <div className="text-sm font-bold leading-tight truncate" data-testid={isDemo ? 'demo-field-label' : undefined}>{field?.name || '—'}</div>
+          <div className={`text-[10px] ${dark ? 'text-[#ff5a52]/70' : 'text-slate-300'}`}>{isDemo ? '🧪 GRANICA ORIENTACYJNA · ' : cropName ? `${cropName}${fieldCrop ? ` · BBCH ${fieldCrop.bbch}` : ''} · ` : ''}{config.treatmentType} · {config.width.toFixed(2)} m</div>
         </div>
         <div className="flex flex-col items-end gap-1">
           <div className={`${hud} px-3 py-2 grid grid-cols-2 gap-x-3 gap-y-1`}>
@@ -713,7 +742,11 @@ export default function FieldPilot({ initialFieldId }: { initialFieldId?: string
         </div>
       </div>
 
-      <div className="absolute right-2 top-1/2 -translate-y-1/2 flex flex-col gap-2 z-[62]">
+      <div className="absolute right-2 top-1/2 -translate-y-1/2 flex flex-col gap-1.5 z-[62]" data-testid="right-map-controls">
+        <button className={`${rnd} !text-xs`} onClick={() => setRightControlsOpen((open) => !open)} aria-label={rightControlsOpen ? 'Zwiń prawe kontrolki mapy' : 'Rozwiń prawe kontrolki mapy'} aria-expanded={rightControlsOpen} title={rightControlsOpen ? 'Zwiń kontrolki mapy' : 'Rozwiń kontrolki mapy'} data-testid="toggle-right-map-controls">
+          {rightControlsOpen ? '×' : '⋮'}
+        </button>
+        {rightControlsOpen && <>
         {terrain3d && <div className="relative">
           <button className={`${rnd} !text-[10px]`} onClick={() => setCameraMenu((value) => !value)} data-testid="terrain-camera-menu" aria-label="Tryby kamery">CAM</button>
           {cameraMenu && (
@@ -754,20 +787,27 @@ export default function FieldPilot({ initialFieldId }: { initialFieldId?: string
         </button>
         <button className={rnd} onClick={() => mapApi.current?.zoomIn()} data-testid="map-zoom-in">+</button>
         <button className={rnd} onClick={() => mapApi.current?.zoomOut()} data-testid="map-zoom-out">−</button>
+        <button className={`${rnd} !text-xs`} onClick={fitCurrentField} data-testid="map-fit-field" title="Dopasuj widok do pola" aria-label="Dopasuj widok do pola">FIT</button>
         <button className={rnd} onClick={() => mapApi.current?.center()} data-testid="map-center">◎</button>
         <button className={`${rnd} ${courseUp ? (dark ? 'ring-2 ring-[#ff3b30]' : 'ring-2 ring-emerald-400') : ''}`} onClick={() => terrain3d ? setTerrainCamera(terrainCameraMode === 'course-up' ? 'north-up' : 'course-up') : setCourseUp((v) => !v)} data-testid="map-rotate">🧭</button>
         <button className={rnd} onClick={toggleFs} data-testid="map-fullscreen">⛶</button>
+        </>}
       </div>
 
-      <div className="absolute left-2 top-24 flex flex-col gap-2 z-[62]">
-        <button data-testid="set-a-btn" onClick={setA} disabled={!fix} className={`w-12 h-12 rounded-2xl font-black text-white shadow-lg disabled:opacity-40 ${pointA ? 'bg-emerald-700' : 'bg-emerald-600'}`} title="Ustaw punkt A">A</button>
-        <button data-testid="set-b-btn" onClick={setB} disabled={!fix || !pointA} className={`w-12 h-12 rounded-2xl font-black text-white shadow-lg disabled:opacity-40 ${pointB ? 'bg-red-700' : 'bg-red-600'}`} title="Ustaw punkt B">B</button>
+      <div className="absolute left-2 top-24 flex flex-col gap-1.5 z-[62]" data-testid="left-map-controls">
+        <button className={`${rnd} !text-xs`} onClick={() => setLeftControlsOpen((open) => !open)} aria-label={leftControlsOpen ? 'Zwiń lewe kontrolki mapy' : 'Rozwiń lewe kontrolki mapy'} aria-expanded={leftControlsOpen} title={leftControlsOpen ? 'Zwiń kontrolki mapy' : 'Rozwiń kontrolki mapy'} data-testid="toggle-left-map-controls">
+          {leftControlsOpen ? '×' : '⋮'}
+        </button>
+        {leftControlsOpen && <>
+        <button data-testid="set-a-btn" onClick={setA} disabled={!fix} className={`w-10 h-10 rounded-xl font-black text-white shadow-lg disabled:opacity-40 ${pointA ? 'bg-emerald-700' : 'bg-emerald-600'}`} title="Ustaw punkt A">A</button>
+        <button data-testid="set-b-btn" onClick={setB} disabled={!fix || !pointA} className={`w-10 h-10 rounded-xl font-black text-white shadow-lg disabled:opacity-40 ${pointB ? 'bg-red-700' : 'bg-red-600'}`} title="Ustaw punkt B">B</button>
         {isDemo && (
-          <button data-testid="simulate-btn" onClick={startSimulation} className="w-12 h-12 rounded-2xl bg-sky-600 text-white text-xl font-black shadow-lg" title="Symuluj przejazd">▶</button>
+          <button data-testid="simulate-btn" onClick={startSimulation} className="w-10 h-10 rounded-xl bg-sky-600 text-white text-xl font-black shadow-lg" title="Symuluj przejazd">▶</button>
         )}
         {manualLabel && (
           <button onClick={() => setManualLabel(null)} className={`${rnd} !text-xs`} data-testid="auto-line-btn">AUTO</button>
         )}
+        </>}
       </div>
 
       {terrain3d && (
