@@ -18,12 +18,10 @@ interface Position {
   heading: number | null;
 }
 
-export interface FieldPilot3DProps {
-  position?: Position | null;
-  track?: [number, number][];
+interface FieldPilot3DProps {
+  position: Position | null;
+  track: [number, number][];
   geometry?: unknown;
-  fieldGeo?: [number, number][];
-  speed?: number;
   info?: GuidanceInfo;
   implementWidth?: number;
   heading?: number | null;
@@ -31,148 +29,86 @@ export interface FieldPilot3DProps {
   isDemo?: boolean;
 }
 
-const convertGpsToLocalMeters = (
-  lat: number,
-  lng: number,
-  refLat: number,
-  refLng: number
-) => {
+const convertGpsToLocalMeters = (lat: number, lng: number, refLat: number, refLng: number) => {
   const metersPerLat = 111132.92;
   const metersPerLng = 111412.84 * Math.cos((refLat * Math.PI) / 180);
-
-  const x = (lng - refLng) * metersPerLng;
-  const z = -(lat - refLat) * metersPerLat;
-  return { x, z };
+  return {
+    x: (lng - refLng) * metersPerLng,
+    z: -(lat - refLat) * metersPerLat,
+  };
 };
 
-const TilledSoilCoverage = ({ width, length }: { width: number; length: number }) => {
+// Ostra, dynamiczna struktura gleby pola
+const HighResFieldTerrain = () => {
   return (
-    <mesh position={[0, 0.02, -length / 2]} rotation={[-Math.PI / 2, 0, 0]}>
-      <planeGeometry args={[width, Math.max(1, length), 1, 1]} />
-      <meshStandardMaterial
-        color="#271910"
-        roughness={0.95}
-        metalness={0.05}
-        transparent
-        opacity={0.6}
-        side={THREE.DoubleSide}
+    <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow position={[0, 0, 0]}>
+      <planeGeometry args={[500, 500]} />
+      <meshStandardMaterial 
+        color="#2d3a1e" 
+        roughness={0.9} 
+        metalness={0.1} 
       />
     </mesh>
   );
 };
 
-const CultivatorImplement = () => (
-  <group position={[0, 0, -1.8]}>
-    <mesh position={[0, 0.4, 0]}>
-      <boxGeometry args={[6.0, 0.15, 1.8]} />
-      <meshStandardMaterial color="#dc2626" roughness={0.4} />
-    </mesh>
-    {[-2.7, -1.8, -0.9, 0, 0.9, 1.8, 2.7].map((x, i) => (
-      <group key={i} position={[x, 0.2, 0.3]}>
-        <mesh rotation={[0, 0, Math.PI / 4]}>
-          <cylinderGeometry args={[0.25, 0.25, 0.05, 12]} />
-          <meshStandardMaterial color="#475569" metalness={0.8} roughness={0.2} />
-        </mesh>
-      </group>
-    ))}
-  </group>
-);
-
-const SprayerImplement = () => (
-  <group position={[0, 0.5, -1.8]}>
-    <mesh position={[0, 0.6, 0.5]}>
-      <cylinderGeometry args={[0.7, 0.7, 1.8, 16]} />
-      <meshStandardMaterial color="#facc15" roughness={0.3} />
-    </mesh>
-    <mesh position={[0, 0.4, -0.6]}>
-      <boxGeometry args={[24.0, 0.3, 0.2]} />
-      <meshStandardMaterial color="#1e293b" />
-    </mesh>
-  </group>
-);
-
-const TractorUnit = ({
-  position,
-  heading,
-  implementWidth = 6,
-  refPos,
-  onPositionUpdate,
-}: {
-  position: Position | null;
-  heading: number | null;
-  implementWidth?: number;
-  refPos: { lat: number; lng: number };
-  onPositionUpdate: (z: number, x: number) => void;
-}) => {
-  const tractorRef = useRef<THREE.Group>(null);
-
-  useFrame(() => {
-    if (tractorRef.current && position) {
-      const { x, z } = convertGpsToLocalMeters(position.lat, position.lng, refPos.lat, refPos.lng);
-
-      tractorRef.current.position.set(x, 0.1, z);
-
-      if (heading !== null && Number.isFinite(heading)) {
-        tractorRef.current.rotation.y = -(heading * Math.PI) / 180;
-      }
-
-      onPositionUpdate(z, x);
-    }
-  });
-
+// Realistyczny model ciągnika 3D
+const ProfessionalTractor = ({ implementWidth = 6 }: { implementWidth?: number }) => {
   return (
-    <group ref={tractorRef}>
-      <mesh position={[0, 0.9, 0.6]} castShadow>
-        <boxGeometry args={[1.7, 1.3, 2.6]} />
-        <meshStandardMaterial color="#15803d" roughness={0.3} />
+    <group>
+      {/* Maska i silnik */}
+      <mesh position={[0, 1.1, 0.8]} castShadow>
+        <boxGeometry args={[1.8, 1.2, 2.4]} />
+        <meshStandardMaterial color="#16a34a" roughness={0.3} />
       </mesh>
-      <mesh position={[0, 1.85, 0.3]}>
-        <boxGeometry args={[1.35, 1.1, 1.2]} />
-        <meshStandardMaterial color="#0f172a" transparent opacity={0.8} />
+      {/* Kabina ze szkłem */}
+      <mesh position={[0, 2.0, -0.2]}>
+        <boxGeometry args={[1.5, 1.3, 1.4]} />
+        <meshStandardMaterial color="#1e293b" roughness={0.1} transparent opacity={0.75} />
       </mesh>
-      {implementWidth > 15 ? <SprayerImplement /> : <CultivatorImplement />}
+      {/* Dwa duże tylne koła */}
+      {[-1.0, 1.0].map((x, i) => (
+        <mesh key={i} position={[x, 0.9, -0.5]} rotation={[0, 0, Math.PI / 2]}>
+          <cylinderGeometry args={[0.85, 0.85, 0.5, 24]} />
+          <meshStandardMaterial color="#0f172a" roughness={0.8} />
+        </mesh>
+      ))}
+      {/* Dwa przednie koła */}
+      {[-0.9, 0.9].map((x, i) => (
+        <mesh key={i} position={[x, 0.55, 1.4]} rotation={[0, 0, Math.PI / 2]}>
+          <cylinderGeometry args={[0.55, 0.55, 0.4, 20]} />
+          <meshStandardMaterial color="#0f172a" roughness={0.8} />
+        </mesh>
+      ))}
+      {/* Belka narzędzia / Maszyny z tyłu */}
+      <mesh position={[0, 0.5, -2.2]}>
+        <boxGeometry args={[implementWidth, 0.25, 0.4]} />
+        <meshStandardMaterial color="#ef4444" metalness={0.5} />
+      </mesh>
     </group>
   );
 };
 
-const FieldTerrain = () => {
+// Świecąca, trójwymiarowa linia przejazdu AB
+const Guideline3D = ({ xte = 0 }: { xte?: number }) => {
   return (
-    <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow position={[0, 0, 0]}>
-      <planeGeometry args={[300, 300, 32, 32]} />
-      <meshStandardMaterial color="#3f6212" roughness={0.8} />
+    <mesh position={[xte, 0.05, -50]} rotation={[-Math.PI / 2, 0, 0]}>
+      <planeGeometry args={[0.3, 200]} />
+      <meshBasicMaterial color="#38bdf8" transparent opacity={0.8} side={THREE.DoubleSide} />
     </mesh>
   );
 };
 
-const TrackLine = ({ track, refPos }: { track: [number, number][]; refPos: { lat: number; lng: number } }) => {
-  const points = useMemo(() => {
-    return track.map(([lat, lng]) => {
-      const { x, z } = convertGpsToLocalMeters(lat, lng, refPos.lat, refPos.lng);
-      return new THREE.Vector3(x, 0.15, z);
-    });
-  }, [track, refPos]);
-
-  const geometry = useMemo(() => new THREE.BufferGeometry().setFromPoints(points), [points]);
-  const lineObject = useMemo(() => {
-    return new THREE.Line(geometry, new THREE.LineBasicMaterial({ color: '#10b981', linewidth: 3 }));
-  }, [geometry]);
-
-  if (points.length < 2) return null;
-
-  return <primitive object={lineObject} />;
-};
-
 export const FieldPilot3DNavigation: React.FC<FieldPilot3DProps> = ({
-  position = null,
+  position,
   track = [],
   info,
   implementWidth = 6,
-  heading = null,
+  heading = 0,
   speedKmh = 0,
   isDemo = false,
 }) => {
-  const [tractorZ, setTractorZ] = useState(0);
-  const [tractorX, setTractorX] = useState(0);
+  const tractorGroupRef = useRef<THREE.Group>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera>(null);
 
   const refPos = useMemo(() => {
@@ -181,108 +117,50 @@ export const FieldPilot3DNavigation: React.FC<FieldPilot3DProps> = ({
     return { lat: 52.2297, lng: 21.0122 };
   }, []);
 
-  useEffect(() => {
-    if (cameraRef.current) {
-      cameraRef.current.position.set(tractorX + 5, 12, tractorZ + 15);
-      cameraRef.current.lookAt(tractorX, 2, tractorZ);
+  useFrame(() => {
+    if (position && tractorGroupRef.current && cameraRef.current) {
+      const { x, z } = convertGpsToLocalMeters(position.lat, position.lng, refPos.lat, refPos.lng);
+      
+      // Ustawienie pozycji ciągnika
+      tractorGroupRef.current.position.set(x, 0, z);
+      
+      const radHeading = -((heading ?? 0) * Math.PI) / 180;
+      tractorGroupRef.current.rotation.y = radHeading;
+
+      // Dynamiczna kamera podążająca TUŻ ZA KABINĄ (Perspektywa TPV)
+      const camOffsetDistance = 9; // Metry za ciągnikiem
+      const camHeight = 4.5;       // Wysokość nad ziemią
+
+      const camX = x + Math.sin(radHeading) * camOffsetDistance;
+      const camZ = z + Math.cos(radHeading) * camOffsetDistance;
+
+      cameraRef.current.position.set(camX, camHeight, camZ);
+      cameraRef.current.lookAt(x, 1.2, z - Math.cos(radHeading) * 5);
     }
-  }, [tractorX, tractorZ]);
+  });
 
   return (
-    <div style={{ position: 'relative', width: '100%', height: '100%', background: '#000' }}>
+    <div style={{ position: 'relative', width: '100%', height: '100%', background: '#020617' }}>
       <Canvas shadows>
-        <PerspectiveCamera ref={cameraRef} makeDefault position={[0, 12, 15]} fov={55} />
-        <OrbitControls target={[tractorX, 2, tractorZ]} maxPolarAngle={Math.PI / 2.2} minDistance={5} maxDistance={40} />
-        <Sky sunPosition={[100, 40, 100]} />
-        <ambientLight intensity={0.8} />
-        <directionalLight position={[25, 45, 15]} intensity={1.4} castShadow />
+        <PerspectiveCamera ref={cameraRef} makeDefault position={[0, 5, 10]} fov={60} />
+        <OrbitControls enablePan={false} maxPolarAngle={Math.PI / 2.1} minDistance={3} maxDistance={25} />
+        
+        {/* Realistyczne oświetlenie ze słońcem */}
+        <Sky sunPosition={[100, 30, 100]} inclination={0.2} azimuth={0.25} />
+        <ambientLight intensity={0.7} />
+        <directionalLight position={[50, 40, 20]} intensity={1.5} castShadow />
 
-        <FieldTerrain />
+        {/* Podłoże pola */}
+        <HighResFieldTerrain />
 
-        {track.length > 0 && <TrackLine track={track} refPos={refPos} />}
+        {/* Aktywna linia AB w 3D */}
+        <Guideline3D xte={info?.xte || 0} />
 
-        {track.length > 0 && (
-          <TilledSoilCoverage width={implementWidth} length={Math.max(1, Math.sqrt(track.length) * 0.5)} />
-        )}
-
-        <TractorUnit
-          position={position}
-          heading={heading}
-          implementWidth={implementWidth}
-          refPos={refPos}
-          onPositionUpdate={(z, x) => {
-            setTractorZ(z);
-            setTractorX(x);
-          }}
-        />
+        {/* Ciągnik w podążającej grupie */}
+        <group ref={tractorGroupRef}>
+          <ProfessionalTractor implementWidth={implementWidth} />
+        </group>
       </Canvas>
-
-      {/* HUD Overlay */}
-      <div style={{
-        position: 'absolute',
-        bottom: 20,
-        left: 20,
-        background: 'rgba(0,0,0,0.7)',
-        border: '1px solid rgba(255,255,255,0.2)',
-        borderRadius: '12px',
-        padding: '16px',
-        color: '#fff',
-        fontSize: '14px',
-        fontFamily: 'monospace',
-        maxWidth: '300px',
-        backdropFilter: 'blur(10px)',
-        zIndex: 10,
-      }}>
-        <div style={{ marginBottom: '8px', fontWeight: 'bold', color: '#22c55e' }}>
-          🚜 NAWIGACJA 3D
-        </div>
-        <div style={{ fontSize: '12px', opacity: 0.8, marginBottom: '6px' }}>
-          {`${speedKmh.toFixed(1)} km/h`}
-        </div>
-        {info?.activeLine && (
-          <div style={{ 
-            color: info.xte > 0 ? '#ef4444' : '#3b82f6',
-            marginBottom: '6px'
-          }}>
-            {`Linia: ${info.activeLine.label}`}
-            <br />
-            {`Odchylenie: ${Math.abs(info.xte).toFixed(2)} m ${info.steer}`}
-          </div>
-        )}
-        <div style={{ fontSize: '12px', opacity: 0.7 }}>
-          {isDemo ? '🧪 DEMO MODE' : '📍 GPS'}
-        </div>
-      </div>
-
-      <div style={{
-        position: 'absolute',
-        top: 20,
-        right: 20,
-        background: 'rgba(0,0,0,0.7)',
-        border: '1px solid rgba(255,255,255,0.2)',
-        borderRadius: '12px',
-        padding: '16px',
-        color: '#fff',
-        fontSize: '12px',
-        fontFamily: 'monospace',
-        backdropFilter: 'blur(10px)',
-        zIndex: 10,
-      }}>
-        <div style={{ marginBottom: '8px', fontWeight: 'bold', color: '#60a5fa' }}>
-          📊 INFORMACJE
-        </div>
-        <div style={{ marginBottom: '4px' }}>
-          Rozstaw: {implementWidth.toFixed(1)} m
-        </div>
-        <div style={{ marginBottom: '4px' }}>
-          Ścieżek: {track.length}
-        </div>
-        {info?.distanceToEnd && info.distanceToEnd > 0 && (
-          <div style={{ color: '#fbbf24' }}>
-            Do końca: {info.distanceToEnd.toFixed(0)} m
-          </div>
-        )}
-      </div>
     </div>
   );
 };
