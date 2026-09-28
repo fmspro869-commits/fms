@@ -1,83 +1,35 @@
-# 🚜 FMS PRECISION 3.0 — Wdrożenie (Netlify / Railway / własny hosting)
+# FMS — wdrożenie i CI/CD (Netlify)
 
-Aplikacja jest w 100% frontendowa (React + TypeScript + Vite), dane trzyma lokalnie w przeglądarce
-(`localStorage`) i działa jako PWA. Do uruchomienia wystarczy zbudować statyczne pliki i je hostować —
-**nie potrzebujesz serwera ani bazy danych**.
+Aplikacja jest frontendowa (React + TypeScript + Vite). Build: `yarn build` → katalog `dist`.
 
-Pogoda pobierana jest na żywo z **Open-Meteo** (bez klucza API). Mapy: OpenStreetMap (bez klucza).
+## Automatyczny deploy z GitHuba (zalecane)
 
----
+1. Wejdź na https://app.netlify.com → Add new site → Import an existing project.
+2. Połącz GitHub i wybierz repo `fmspro869-commits/fms`.
+3. Ustawienia (są już w `netlify.toml`, Netlify je odczyta):
+   - Branch: `main`
+   - Build command: `yarn build`
+   - Publish directory: `dist`
+   - Node: 22
+4. Deploy site.
 
-## 1. Uruchomienie lokalne
+Od tej pory:
+- push na `main` → produkcja
+- pull request → Deploy Preview (osobny URL do testów)
+- inny branch → Branch deploy (jeśli włączysz w Site settings → Build & deploy → Branches)
 
-```bash
-cd .               # katalog główny z package.json
-yarn install       # lub: npm install
-yarn dev           # start serwera deweloperskiego (http://localhost:3000)
-```
+## GitHub Actions (opcjonalnie, obok integracji Netlify)
 
-Budowa produkcyjna:
+W repo są dwa workflow:
+- `.github/workflows/ci.yml` — `yarn install --frozen-lockfile` + `yarn build` na PR i `main`
+- `.github/workflows/netlify.yml` — deploy przez CLI, **tylko gdy** dodasz sekrety
 
-```bash
-yarn build         # tworzy katalog dist/  (tsc -b && vite build)
-yarn preview       # podgląd wersji produkcyjnej
-```
+Sekrety (Settings → Secrets and variables → Actions):
+- `NETLIFY_AUTH_TOKEN` — User settings → Applications → Personal access tokens w Netlify
+- `NETLIFY_SITE_ID` — Site settings → Site details → Site ID
 
----
+Bez tych sekretów workflow Netlify się pomija; wystarczy integracja Git z panelu Netlify.
 
-## 2. Netlify (najprościej)
+## Ręczny drop
 
-**Opcja A — z repozytorium GitHub (zalecana):**
-1. Wypchnij projekt na GitHub.
-2. Netlify → *Add new site* → *Import from Git* → wybierz repo.
-3. Ustawienia budowania (już w `netlify.toml`; wymagany Node.js 22):
-   - **Base directory:** pozostaw puste (katalog główny repozytorium)
-   - **Build command:** `yarn build`
-   - **Publish directory:** `dist`
-4. *Deploy*. Plik `public/_redirects` zapewnia poprawny routing SPA.
-
-**Opcja B — ręczne przeciągnięcie (drag & drop):**
-1. Lokalnie: `yarn build`
-2. Wejdź na https://app.netlify.com/drop i przeciągnij katalog `dist`.
-
-Wdrożenie z GitHub automatycznie buduje aplikację po każdym pushu. Wdrożenie przez Drop wymaga
-ponownego zbudowania i przesłania `dist` po każdej zmianie.
-
----
-
-## 3. Railway
-
-Railway najlepiej hostuje statykę przez prosty serwer:
-
-1. Railway → *New Project* → *Deploy from GitHub repo*.
-2. Root directory: katalog główny repozytorium.
-3. Ustaw komendy:
-   - **Build:** `yarn install && yarn build`
-   - **Start:** `npx serve -s dist -l $PORT`
-   (dodaj `serve` do zależności: `yarn add serve`, lub użyj `vite preview --host --port $PORT`)
-4. Deploy. Railway sam wykryje `$PORT`.
-
----
-
-## 4. Inny hosting statyczny (Vercel, Cloudflare Pages, GitHub Pages, nginx)
-
-- **Build command:** `yarn build`
-- **Output/publish:** `dist`
-- **Przekierowanie SPA:** wszystkie ścieżki → `/index.html` (jest w `_redirects` / `netlify.toml`).
-- Dla GitHub Pages / podkatalogu: w `vite.config.ts` `base: './'` jest już ustawione.
-
----
-
-## 5. PWA / Offline
-
-- `public/manifest.webmanifest` + `public/sw.js` — aplikację można „Dodać do ekranu głównego”.
-- Service Worker buforuje powłokę aplikacji; podstawowe moduły (GIS, Dziennik, Field Pilot,
-  Magazyn) działają przy chwilowej utracie sieci. Kafelki map i pogoda wymagają internetu.
-
----
-
-## 6. Uwaga o danych
-
-Dane demonstracyjne (12 pól, maszyny, magazyn, dzierżawy, historia) ładują się automatycznie.
-W **Ustawieniach** można je zresetować lub wyczyścić. Dane zapisują się w `localStorage` przeglądarki —
-architektura jest przygotowana pod podłączenie backendu (Supabase / Firebase / PostgreSQL) w przyszłości.
+Lokalnie: `yarn build` → wrzuć folder `dist` na https://app.netlify.com/drop
