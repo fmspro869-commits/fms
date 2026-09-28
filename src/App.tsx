@@ -1,257 +1,399 @@
-import { useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { FarmProvider, useFarm } from '@/store/FarmContext';
+import { Badge, Btn, Input, Modal, Select, useClickOutside, useDebounced } from '@/components/common';
+import Dashboard from '@/sections/Dashboard';
+import Fields from '@/sections/Fields';
+import Crops from '@/sections/Crops';
+import Calculators from '@/sections/Calculators';
+import Protection from '@/sections/Protection';
+import Weather from '@/sections/Weather';
+import Machines from '@/sections/Machines';
+import Warehouse from '@/sections/Warehouse';
+import Finance from '@/sections/Finance';
+import Precision from '@/sections/Precision';
+import Workers from '@/sections/Workers';
+import Diary from '@/sections/Diary';
+import Reports from '@/sections/Reports';
+import AI from '@/sections/AI';
+import FieldPilot from '@/sections/FieldPilot';
+import Leases from '@/sections/Leases';
+import FieldProfile from '@/sections/FieldProfile';
+import GnssCenter from '@/sections/GnssCenter';
+import { Alerts, Settings } from '@/sections/Misc';
+import { useInitialLocation } from '@/hooks/useInitialLocation';
 
-export type { Nav, NavView } from '@/types/nav';
-export type { Nav as defaultNavType } from '@/types/nav';
+const Terrain3D = lazy(() => import('@/sections/Terrain3D'));
 
-type Tab = 'dashboard' | 'fields' | 'machines' | 'warehouse' | 'settings';
+export interface Nav { go: (section: string, focusId?: string) => void }
 
-const TABS: { id: Tab; label: string }[] = [
-  { id: 'dashboard', label: 'Panel' },
-  { id: 'fields', label: 'Pola' },
-  { id: 'machines', label: 'Maszyny' },
-  { id: 'warehouse', label: 'Magazyn' },
-  { id: 'settings', label: 'Ustawienia' },
+const SECTIONS = [
+  { id: 'dashboard', icon: '🏠', label: 'Centrum' },
+  { id: 'gis', icon: '🗺️', label: 'GIS i Pola' },
+  { id: 'polowa', icon: '🚜', label: 'Praca w Polu' },
+  { id: 'gnss', icon: '🛰️', label: 'GNSS Center' },
+  { id: 'teren3d', icon: '🏔️', label: 'Teren 3D' },
+  { id: 'uprawy', icon: '🌱', label: 'Uprawy i Płodozmian' },
+  { id: 'ochrona', icon: '🐛', label: 'Ochrona Roślin' },
+  { id: 'nawozenie', icon: '🧪', label: 'Nawożenie' },
+  { id: 'pogoda', icon: '🌦️', label: 'Pogoda i Okna' },
+  { id: 'maszyny', icon: '🚜', label: 'Maszyny i Flota' },
+  { id: 'magazyn', icon: '📦', label: 'Magazyn' },
+  { id: 'finanse', icon: '💰', label: 'Finanse' },
+  { id: 'dzierzawy', icon: '📃', label: 'Dzierżawy' },
+  { id: 'precyzyjne', icon: '📡', label: 'Rolnictwo Precyzyjne' },
+  { id: 'profil', icon: '🌾', label: 'Cyfrowy Bliźniak Pola' },
+  { id: 'pracownicy', icon: '👷', label: 'Pracownicy i Zadania' },
+  { id: 'dziennik', icon: '📋', label: 'Dziennik Polowy' },
+  { id: 'analizy', icon: '📊', label: 'Analizy i Raporty' },
+  { id: 'ai', icon: '🤖', label: 'Agro AI' },
+  { id: 'alerts', icon: '🔔', label: 'Powiadomienia' },
+  { id: 'ustawienia', icon: '⚙️', label: 'Ustawienia' },
 ];
 
-export default function App() {
-  const [tab, setTab] = useState<Tab>('dashboard');
-  const [resetMsg, setResetMsg] = useState('');
-  const [clearMsg, setClearMsg] = useState('');
+const MOBILE_TABS = ['dashboard', 'gis', 'dziennik', 'magazyn', 'menu'];
+
+function Shell() {
+  const { state, toast, switchFarm, notify, addField, addTask, addWarehouseItem, addMachine, addTreatment, setFieldCrop } = useFarm();
+  const { center: userCenter, error: locationError, loading: locationLoading, requestLocation } = useInitialLocation();
+  const [section, setSection] = useState(() => location.hash.replace('#', '') || 'dashboard');
+  const [focusId, setFocusId] = useState<string | undefined>();
+  const [mobileMenu, setMobileMenu] = useState(false);
+  const [search, setSearch] = useState('');
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [notifOpen, setNotifOpen] = useState(false);
+  const [farmOpen, setFarmOpen] = useState(false);
+  const [quickOpen, setQuickOpen] = useState(false);
+  const [quickForm, setQuickForm] = useState<string | null>(null);
+  const [online, setOnline] = useState(navigator.onLine);
+  const [qa, setQa] = useState<Record<string, string>>({});
+
+  const debSearch = useDebounced(search, 150);
+  const searchRef = useClickOutside(() => setSearchOpen(false));
+  const notifRef = useClickOutside(() => setNotifOpen(false));
+  const farmRef = useClickOutside(() => setFarmOpen(false));
+
+  useEffect(() => {
+    const on = () => setOnline(true); const off = () => setOnline(false);
+    window.addEventListener('online', on); window.addEventListener('offline', off);
+    return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off); };
+  }, []);
+
+  useEffect(() => {
+    const h = () => setSection(location.hash.replace('#', '') || 'dashboard');
+    window.addEventListener('hashchange', h);
+    return () => window.removeEventListener('hashchange', h);
+  }, []);
+
+  const go = useCallback((s: string, f?: string) => {
+    setSection(s); setFocusId(f); setMobileMenu(false); setNotifOpen(false); setSearchOpen(false); setSearch('');
+    location.hash = s;
+    window.scrollTo({ top: 0 });
+  }, []);
+  const nav: Nav = useMemo(() => ({ go }), [go]);
+
+  const results = useMemo(() => {
+    if (!debSearch.trim()) return [];
+    const q = debSearch.toLowerCase();
+    const r: { icon: string; text: string; sub: string; go: () => void }[] = [];
+    state.fields.filter((f) => f.name.toLowerCase().includes(q)).slice(0, 4).forEach((f) => r.push({ icon: '🟩', text: f.name, sub: `pole · ${f.area} ha`, go: () => go('gis', f.id) }));
+    state.machines.filter((m) => m.name.toLowerCase().includes(q)).slice(0, 3).forEach((m) => r.push({ icon: '🚜', text: m.name, sub: `maszyna · ${m.mth} MTH`, go: () => go('maszyny') }));
+    state.warehouse.filter((w) => w.name.toLowerCase().includes(q)).slice(0, 3).forEach((w) => r.push({ icon: '📦', text: w.name, sub: `magazyn · ${w.stock} ${w.unit}`, go: () => go('magazyn') }));
+    state.tasks.filter((t) => t.title.toLowerCase().includes(q)).slice(0, 3).forEach((t) => r.push({ icon: '✅', text: t.title, sub: `zadanie · ${t.status}`, go: () => go('pracownicy') }));
+    return r;
+  }, [debSearch, state, go]);
+
+  const unread = state.alerts.filter((a) => !a.read && !a.snoozed).length;
+  const activeFarm = state.farms.find((f) => f.id === state.activeFarmId);
+
+  const quickItems = [
+    { k: 'pole', icon: '🟩', label: 'Dodaj pole' },
+    { k: 'uprawa', icon: '🌱', label: 'Dodaj uprawę' },
+    { k: 'zabieg', icon: '💨', label: 'Dodaj zabieg' },
+    { k: 'maszyna', icon: '🚜', label: 'Dodaj maszynę' },
+    { k: 'produkt', icon: '📦', label: 'Dodaj produkt' },
+    { k: 'koszt', icon: '💰', label: 'Dodaj koszt' },
+    { k: 'zadanie', icon: '✅', label: 'Dodaj zadanie' },
+    { k: 'obserwacja', icon: '👁️', label: 'Dodaj obserwację' },
+  ];
+
+  const quickSave = () => {
+    const d = '2026-08-06';
+    switch (quickForm) {
+      case 'pole':
+        if (!qa.nazwa || !qa.area) { notify('Podaj nazwę i powierzchnię', 'err'); return; }
+        addField({ name: qa.nazwa, area: +qa.area, parcelNo: qa.dzialka || '—', district: 'Borek', soilType: 'Gleba płowa (IIIb)', pH: 6.2, P: 'średnia', K: 'średnia', Mg: 'średnia', geo: [[52.662, 19.05], [52.662, 19.062], [52.657, 19.062], [52.657, 19.05]] });
+        notify('Pole dodane'); break;
+      case 'uprawa': {
+        const fc = state.fieldCrops.find((c) => c.fieldId === qa.pole && c.season === 2026);
+        if (!fc || !qa.uprawa) { notify('Wybierz pole i uprawę', 'err'); return; }
+        setFieldCrop({ ...fc, cropName: qa.uprawa, variety: qa.odmiana || fc.variety });
+        notify('Uprawa przypisana'); break;
+      }
+      case 'zabieg': {
+        if (!qa.pole2) { notify('Wybierz pole', 'err'); return; }
+        const fc = state.fieldCrops.find((c) => c.fieldId === qa.pole2 && c.season === 2026);
+        addTreatment({ date: d, type: qa.typ || 'lustracja', fieldId: qa.pole2, crop: fc?.cropName || '—', cost: +qa.koszt || 0, season: 2026, notes: qa.uwagi });
+        notify('Zabieg zapisany — szczegóły uzupełnisz w Dzienniku'); break;
+      }
+      case 'maszyna':
+        if (!qa.nazwa) { notify('Podaj nazwę', 'err'); return; }
+        addMachine({ name: qa.nazwa, category: qa.kategoria || 'ciągnik', brand: qa.marka || '', model: '', year: 2024, regNo: '—', mth: 0, nextServiceMth: 500, fuel: 'ON', consumption: 0 });
+        notify('Maszyna dodana'); break;
+      case 'produkt':
+        if (!qa.nazwa) { notify('Podaj nazwę', 'err'); return; }
+        addWarehouseItem({ name: qa.nazwa, category: qa.kategoria2 || 'nawozy', producer: '', unit: 'kg', stock: +qa.stan || 0, minStock: 0, price: +qa.cena || 0, supplier: '', purchaseDate: d });
+        notify('Produkt dodany'); break;
+      case 'koszt': {
+        if (!qa.pole3 || !qa.kwota) { notify('Wybierz pole i kwotę', 'err'); return; }
+        const fc = state.fieldCrops.find((c) => c.fieldId === qa.pole3 && c.season === 2026);
+        addTreatment({ date: d, type: 'koszt ogólny', fieldId: qa.pole3, crop: fc?.cropName || '—', cost: +qa.kwota, season: 2026, notes: qa.opis || 'Koszt dodany ręcznie' });
+        notify('Koszt dodany do finansów pola'); break;
+      }
+      case 'zadanie':
+        if (!qa.tytul) { notify('Podaj nazwę zadania', 'err'); return; }
+        addTask({ title: qa.tytul, dueDate: qa.termin || d, priority: 'średni', status: 'nowe', kind: 'inne', fieldId: qa.pole4 || undefined });
+        notify('Zadanie dodane'); break;
+      case 'obserwacja': {
+        if (!qa.pole5) { notify('Wybierz pole', 'err'); return; }
+        const fc = state.fieldCrops.find((c) => c.fieldId === qa.pole5 && c.season === 2026);
+        addTreatment({ date: d, type: 'lustracja', fieldId: qa.pole5, crop: fc?.cropName || '—', cost: 0, season: 2026, notes: qa.uwagi2 || 'Obserwacja polowa' });
+        notify('Obserwacja zapisana w dzienniku'); break;
+      }
+    }
+    setQuickForm(null); setQa({}); setQuickOpen(false);
+  };
+
+  const fieldSelect = (key: string, label: string) => (
+    <Select label={label} value={qa[key] || ''} onChange={(e) => setQa({ ...qa, [key]: e.target.value })}>
+      <option value="">— wybierz pole —</option>
+      {state.fields.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+    </Select>
+  );
 
   return (
-    <div className="min-h-screen flex flex-col">
-      <header className="border-b border-border px-6 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center text-white font-bold text-sm">
-            F
-          </div>
-          <div>
-            <h1 className="text-lg font-semibold leading-tight">FMS Precision 3.0</h1>
-            <p className="text-xs text-muted-foreground">Zarządzanie gospodarstwem</p>
-          </div>
+    <div className="min-h-screen text-slate-100 antialiased relative" style={{ background: 'radial-gradient(1200px 600px at 80% -10%, rgba(16,185,129,0.10), transparent 60%), radial-gradient(900px 500px at -10% 10%, rgba(56,189,248,0.08), transparent 55%), #0a1120' }}>
+      <aside className="hidden lg:flex fixed inset-y-0 left-0 w-60 flex-col bg-[#0b1424]/90 backdrop-blur-xl border-r border-white/5 z-40">
+        <div className="px-4 py-4 border-b border-white/5">
+          <div className="font-black text-lg tracking-tight bg-gradient-to-r from-emerald-400 to-teal-300 bg-clip-text text-transparent">FMS PRECISION 3.0</div>
+          <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Precision Farm Management</div>
         </div>
-        <span className="text-xs text-muted-foreground hidden sm:block">
-          dane lokalnie w przeglądarce
-        </span>
+        <nav className="flex-1 overflow-y-auto py-2">
+          {SECTIONS.map((s) => (
+            <button key={s.id} onClick={() => go(s.id)}
+              className={`w-full flex items-center gap-2.5 px-4 py-2.5 text-sm transition-all ${section === s.id ? 'bg-gradient-to-r from-emerald-500/20 to-transparent text-emerald-300 border-r-2 border-emerald-400' : 'text-slate-400 hover:bg-white/5 hover:text-slate-100'}`}>
+              <span>{s.icon}</span><span>{s.label}</span>
+              {s.id === 'alerts' && unread > 0 && <span className="ml-auto text-[10px] bg-red-500 text-white rounded-full px-1.5 py-0.5">{unread}</span>}
+            </button>
+          ))}
+        </nav>
+        <div className="p-3 border-t border-white/5 text-[11px] text-slate-500">
+          <span className={`inline-block w-2 h-2 rounded-full mr-1.5 ${online ? 'bg-emerald-400' : 'bg-amber-400'}`} />
+          {online ? 'Online · dane lokalne' : 'Tryb offline'}
+        </div>
+      </aside>
+
+      <header className="fixed top-0 right-0 left-0 lg:left-60 h-14 bg-[#0b1424]/80 backdrop-blur-xl border-b border-white/5 z-30 flex items-center gap-2 px-3">
+        <span className="lg:hidden font-black bg-gradient-to-r from-emerald-400 to-teal-300 bg-clip-text text-transparent mr-1">FMS 3.0</span>
+        <div className="relative flex-1 max-w-md" ref={searchRef}>
+          <input value={search} onChange={(e) => { setSearch(e.target.value); setSearchOpen(true); }} onFocus={() => setSearchOpen(true)}
+            placeholder="🔍 Szukaj pola, maszyny, produktu…" className="w-full bg-slate-800/70 border border-slate-700 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-emerald-500 placeholder:text-slate-500" />
+          {searchOpen && results.length > 0 && (
+            <div className="absolute top-full mt-1 left-0 right-0 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden">
+              {results.map((r, i) => (
+                <button key={i} onClick={r.go} className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left hover:bg-slate-800 transition-colors">
+                  <span>{r.icon}</span>
+                  <div><div className="text-sm text-slate-100">{r.text}</div><div className="text-xs text-slate-500">{r.sub}</div></div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="relative" ref={farmRef}>
+          <button onClick={() => setFarmOpen(!farmOpen)} className="hidden sm:flex items-center gap-1.5 bg-slate-800/70 border border-slate-700 rounded-lg px-3 py-1.5 text-sm hover:border-emerald-500">
+            🏡 <span className="max-w-[140px] truncate">{activeFarm?.name}</span> ▾
+          </button>
+          {farmOpen && (
+            <div className="absolute top-full mt-1 right-0 w-64 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden">
+              {state.farms.map((f) => (
+                <button key={f.id} onClick={() => { switchFarm(f.id); setFarmOpen(false); notify(`Gospodarstwo: ${f.name}`); }}
+                  className="w-full text-left px-3 py-2.5 hover:bg-slate-800 text-sm">{f.name} {f.id === state.activeFarmId && <span className="text-emerald-400">●</span>}</button>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="relative" ref={notifRef}>
+          <button onClick={() => setNotifOpen(!notifOpen)} className="relative w-9 h-9 rounded-lg bg-slate-800/70 border border-slate-700 hover:border-emerald-500">
+            🔔{unread > 0 && <span className="absolute -top-1 -right-1 text-[10px] bg-red-500 text-white rounded-full px-1.5 py-0.5">{unread}</span>}
+          </button>
+          {notifOpen && (
+            <div className="absolute top-full mt-1 right-0 w-80 max-h-96 overflow-y-auto bg-slate-900 border border-slate-700 rounded-xl shadow-2xl p-2 space-y-1.5">
+              <div className="flex justify-between items-center px-1 py-1"><span className="text-sm font-semibold">Powiadomienia</span><button onClick={() => go('alerts')} className="text-xs text-emerald-400">Zobacz wszystkie →</button></div>
+              {state.alerts.filter((a) => !a.snoozed).slice(0, 6).map((a) => (
+                <button key={a.id} onClick={() => go('alerts')} className={`w-full text-left rounded-lg border p-2 ${a.read ? 'border-slate-800 opacity-60' : 'border-slate-700 bg-slate-800/50'}`}>
+                  <div className="text-xs text-slate-200">{a.priority === 'krytyczne' ? '🔴' : a.priority === 'ostrzeżenie' ? '🟡' : '🟢'} {a.title}</div>
+                  <div className="text-[10px] text-slate-500 mt-0.5">{a.date} · {a.category}</div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        <Badge tone="warn">TRYB DEMO</Badge>
+        <button onClick={() => setQuickOpen(true)} className="w-9 h-9 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xl font-bold transition-colors">+</button>
       </header>
 
-      <nav className="border-b border-border px-6 flex gap-1 overflow-x-auto">
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            onClick={() => setTab(t.id)}
-            className={
-              'px-4 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ' +
-              (tab === t.id
-                ? 'border-primary text-primary'
-                : 'border-transparent text-muted-foreground hover:text-foreground')
-            }
-          >
-            {t.label}
-          </button>
-        ))}
-      </nav>
-
-      <main className="flex-1 p-6 max-w-6xl mx-auto w-full">
-        {tab === 'dashboard' && <DashboardPanel onNavigate={setTab} />}
-        {tab === 'fields' && (
-          <SimplePanel
-            title="Pola"
-            desc="Lista pól, powierzchnie, uprawy i historia zabiegów."
-            icon="🌾"
-            color="bg-green-500/10 text-green-400"
-            border="border-green-500/20"
-            onNavigate={setTab}
-            target="machines"
-            cta="Zobacz maszyny"
-            ctaColor="bg-green-600 hover:bg-green-500"
-            extra="12 pól demonstracyjnych"
-            extraColor="text-green-400"
-            extraBg="bg-green-500/10"
-            extraBorder="border-green-500/20"
-            extraDesc="Dane zapisane w localStorage przeglądarki."
-            extraDesc2="W Ustawieniach możesz je zresetować."
-          />
-        )}
-        {tab === 'machines' && (
-          <SimplePanel
-            title="Maszyny"
-            desc="Flota, koszty sesji i historia pracy."
-            icon="🚜"
-            color="bg-blue-500/10 text-blue-400"
-            border="border-blue-500/20"
-            onNavigate={setTab}
-            target="warehouse"
-            cta="Zobacz magazyn"
-            ctaColor="bg-blue-600 hover:bg-blue-500"
-            extra="Koszty sesji maszyn"
-            extraColor="text-blue-400"
-            extraBg="bg-blue-500/10"
-            extraBorder="border-blue-500/20"
-            extraDesc="Śledzenie paliwa, serwisu i godzin pracy."
-            extraDesc2="Dane zapisane w localStorage przeglądarki."
-          />
-        )}
-        {tab === 'warehouse' && (
-          <SimplePanel
-            title="Magazyn"
-            desc="Nawozy, środki ochrony, części i stany magazynowe."
-            icon="📦"
-            color="bg-amber-500/10 text-amber-400"
-            border="border-amber-500/20"
-            onNavigate={setTab}
-            target="settings"
-            cta="Otwórz ustawienia"
-            ctaColor="bg-amber-600 hover:bg-amber-500"
-            extra="Stany i alerty"
-            extraColor="text-amber-400"
-            extraBg="bg-amber-500/10"
-            extraBorder="border-amber-500/20"
-            extraDesc="Powiadomienia o niskich stanach."
-            extraDesc2="Dane zapisane w localStorage przeglądarki."
-          />
-        )}
-        {tab === 'settings' && (
-          <SettingsPanel
-            resetMsg={resetMsg}
-            clearMsg={clearMsg}
-            onResetMsg={setResetMsg}
-            onClearMsg={setClearMsg}
-            onNavigate={setTab}
-          />
-        )}
+      <main className="lg:pl-60 pt-14 pb-20 lg:pb-6">
+        <div className="p-3 md:p-5 max-w-[1600px] mx-auto">
+          {section === 'dashboard' && <Dashboard nav={nav} />}
+          {section === 'gis' && <Fields nav={nav} focusId={focusId} userCenter={userCenter ?? undefined} locationError={locationError} />}
+          {section === 'uprawy' && <Crops nav={nav} />}
+          {section === 'nawozenie' && <Calculators />}
+          {section === 'ochrona' && <Protection />}
+          {section === 'pogoda' && <Weather />}
+          {section === 'maszyny' && <Machines />}
+          {section === 'polowa' && <FieldPilot initialFieldId={focusId} />}
+          {section === 'teren3d' && (
+            <Suspense fallback={<div className="py-12 text-center text-sm text-slate-400">Ładowanie mapy 3D…</div>}>
+              <Terrain3D
+                nav={nav}
+                userCenter={userCenter ?? undefined}
+                locationError={locationError}
+                locationLoading={locationLoading}
+                requestLocation={requestLocation}
+              />
+            </Suspense>
+          )}
+          {section === 'magazyn' && <Warehouse />}
+          {section === 'finanse' && <Finance />}
+          {section === 'precyzyjne' && <Precision />}
+          {section === 'dzierzawy' && <Leases />}
+          {section === 'profil' && <FieldProfile nav={nav} focusId={focusId} />}
+          {section === 'gnss' && <GnssCenter />}
+          {section === 'pracownicy' && <Workers />}
+          {section === 'dziennik' && <Diary />}
+          {section === 'analizy' && <Reports />}
+          {section === 'ai' && <AI />}
+          {section === 'alerts' && <Alerts />}
+          {section === 'ustawienia' && <Settings />}
+        </div>
       </main>
 
-      <footer className="border-t border-border px-6 py-3 text-xs text-muted-foreground flex flex-wrap gap-x-4 gap-y-1">
-        <span>FMS Precision 3.0</span>
-        <span>Pogoda: Open-Meteo</span>
-        <span>Mapy: OpenStreetMap</span>
-        <span>PWA</span>
-      </footer>
+      <nav className="lg:hidden fixed bottom-0 inset-x-0 bg-slate-900/95 backdrop-blur border-t border-slate-800 z-40 grid grid-cols-5 h-16">
+        {MOBILE_TABS.map((t) => {
+          if (t === 'menu') return (
+            <button key={t} onClick={() => setMobileMenu(true)} className="flex flex-col items-center justify-center gap-0.5 text-slate-400">
+              <span className="text-xl">☰</span><span className="text-[10px]">Menu</span>
+            </button>
+          );
+          const s = SECTIONS.find((x) => x.id === t)!;
+          return (
+            <button key={t} onClick={() => go(t)} className={`flex flex-col items-center justify-center gap-0.5 ${section === t ? 'text-emerald-400' : 'text-slate-400'}`}>
+              <span className="text-xl">{s.icon}</span><span className="text-[10px]">{s.label.split(' ')[0]}</span>
+            </button>
+          );
+        })}
+      </nav>
+
+      {mobileMenu && (
+        <div className="lg:hidden fixed inset-0 z-50 bg-slate-950/95 backdrop-blur overflow-y-auto p-4">
+          <div className="flex justify-between items-center mb-4">
+            <span className="font-black text-emerald-400 text-lg">FMS PRECISION 3.0 🌾</span>
+            <button onClick={() => setMobileMenu(false)} className="text-slate-400 text-2xl px-2">✕</button>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            {SECTIONS.map((s) => (
+              <button key={s.id} onClick={() => go(s.id)} className={`flex items-center gap-2 rounded-xl border p-3 text-sm ${section === s.id ? 'border-emerald-500 bg-emerald-900/20 text-emerald-300' : 'border-slate-700 text-slate-200'}`}>
+                <span className="text-lg">{s.icon}</span>{s.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <Modal open={quickOpen} onClose={() => { setQuickOpen(false); setQuickForm(null); }} title={quickForm ? quickItems.find((q) => q.k === quickForm)!.label : '⚡ Szybkie dodawanie'}>
+        {!quickForm ? (
+          <div className="grid grid-cols-2 gap-2">
+            {quickItems.map((q) => (
+              <button key={q.k} onClick={() => { setQuickForm(q.k); setQa({}); }}
+                className="flex items-center gap-2.5 rounded-xl border border-slate-700 p-3.5 text-sm text-slate-100 hover:border-emerald-500 transition-colors">
+                <span className="text-xl">{q.icon}</span>{q.label}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="grid gap-3">
+            {quickForm === 'pole' && (<>
+              <Input label="Nazwa pola *" value={qa.nazwa || ''} onChange={(e) => setQa({ ...qa, nazwa: e.target.value })} />
+              <div className="grid grid-cols-2 gap-3">
+                <Input label="Powierzchnia (ha) *" type="number" value={qa.area || ''} onChange={(e) => setQa({ ...qa, area: e.target.value })} />
+                <Input label="Nr działki" value={qa.dzialka || ''} onChange={(e) => setQa({ ...qa, dzialka: e.target.value })} />
+              </div>
+              <p className="text-xs text-slate-500">Pełna edycja (gleba, granice) w module GIS i Pola.</p>
+            </>)}
+            {quickForm === 'uprawa' && (<>
+              {fieldSelect('pole', 'Pole *')}
+              <Input label="Uprawa *" placeholder="np. Pszenica ozima" value={qa.uprawa || ''} onChange={(e) => setQa({ ...qa, uprawa: e.target.value })} />
+              <Input label="Odmiana" value={qa.odmiana || ''} onChange={(e) => setQa({ ...qa, odmiana: e.target.value })} />
+            </>)}
+            {quickForm === 'zabieg' && (<>
+              <Select label="Typ zabiegu" value={qa.typ || 'oprysk'} onChange={(e) => setQa({ ...qa, typ: e.target.value })}>
+                {['oprysk', 'nawożenie', 'siew', 'orka', 'talerzowanie', 'wałowanie', 'zbiór', 'lustracja'].map((x) => <option key={x}>{x}</option>)}
+              </Select>
+              {fieldSelect('pole2', 'Pole *')}
+              <Input label="Koszt (zł)" type="number" value={qa.koszt || ''} onChange={(e) => setQa({ ...qa, koszt: e.target.value })} />
+              <Input label="Uwagi" value={qa.uwagi || ''} onChange={(e) => setQa({ ...qa, uwagi: e.target.value })} />
+            </>)}
+            {quickForm === 'maszyna' && (<>
+              <Input label="Nazwa *" placeholder="np. John Deere 6120M" value={qa.nazwa || ''} onChange={(e) => setQa({ ...qa, nazwa: e.target.value })} />
+              <Select label="Kategoria" value={qa.kategoria || 'ciągnik'} onChange={(e) => setQa({ ...qa, kategoria: e.target.value })}>
+                {['ciągnik', 'kombajn', 'opryskiwacz', 'rozsiewacz', 'agregat', 'siewnik', 'przyczepa'].map((x) => <option key={x}>{x}</option>)}
+              </Select>
+              <Input label="Marka" value={qa.marka || ''} onChange={(e) => setQa({ ...qa, marka: e.target.value })} />
+            </>)}
+            {quickForm === 'produkt' && (<>
+              <Input label="Nazwa produktu *" value={qa.nazwa || ''} onChange={(e) => setQa({ ...qa, nazwa: e.target.value })} />
+              <Select label="Kategoria" value={qa.kategoria2 || 'nawozy'} onChange={(e) => setQa({ ...qa, kategoria2: e.target.value })}>
+                {['nasiona', 'nawozy', 'ŚOR', 'paliwo', 'części', 'materiały'].map((x) => <option key={x}>{x}</option>)}
+              </Select>
+              <div className="grid grid-cols-2 gap-3">
+                <Input label="Stan (kg)" type="number" value={qa.stan || ''} onChange={(e) => setQa({ ...qa, stan: e.target.value })} />
+                <Input label="Cena (zł/kg)" type="number" value={qa.cena || ''} onChange={(e) => setQa({ ...qa, cena: e.target.value })} />
+              </div>
+            </>)}
+            {quickForm === 'koszt' && (<>
+              {fieldSelect('pole3', 'Pole *')}
+              <Input label="Kwota (zł) *" type="number" value={qa.kwota || ''} onChange={(e) => setQa({ ...qa, kwota: e.target.value })} />
+              <Input label="Opis kosztu" placeholder="np. usługa oprysku" value={qa.opis || ''} onChange={(e) => setQa({ ...qa, opis: e.target.value })} />
+            </>)}
+            {quickForm === 'zadanie' && (<>
+              <Input label="Nazwa zadania *" value={qa.tytul || ''} onChange={(e) => setQa({ ...qa, tytul: e.target.value })} />
+              <Input label="Termin" type="date" value={qa.termin || '2026-08-06'} onChange={(e) => setQa({ ...qa, termin: e.target.value })} />
+              {fieldSelect('pole4', 'Pole (opcjonalnie)')}
+            </>)}
+            {quickForm === 'obserwacja' && (<>
+              {fieldSelect('pole5', 'Pole *')}
+              <Input label="Treść obserwacji" placeholder="np. widoczne mszyce na flagowym" value={qa.uwagi2 || ''} onChange={(e) => setQa({ ...qa, uwagi2: e.target.value })} />
+            </>)}
+            <div className="flex justify-end gap-2">
+              <Btn variant="ghost" onClick={() => setQuickForm(null)}>← Wstecz</Btn>
+              <Btn onClick={quickSave}>Zapisz</Btn>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {toast && (
+        <div className={`fixed bottom-20 lg:bottom-6 left-1/2 -translate-x-1/2 z-[100] px-5 py-3 rounded-xl shadow-2xl border text-sm font-medium animate-pulse-once ${toast.kind === 'ok' ? 'bg-emerald-900/90 border-emerald-500 text-emerald-100' : 'bg-red-900/90 border-red-500 text-red-100'}`}>
+          {toast.kind === 'ok' ? '✔' : '⚠'} {toast.msg}
+        </div>
+      )}
     </div>
   );
 }
 
-function DashboardPanel({ onNavigate }: { onNavigate: (t: Tab) => void }) {
-  const cards = [
-    { label: 'Pola', value: '12', sub: 'łącznie ha', color: 'text-green-400', bg: 'bg-green-500/10', border: 'border-green-500/20', tab: 'fields' as Tab },
-    { label: 'Maszyny', value: '8', sub: 'w flocie', color: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/20', tab: 'machines' as Tab },
-    { label: 'Magazyn', value: '24', sub: 'pozycje', color: 'text-amber-400', bg: 'bg-amber-500/10', border: 'border-amber-500/20', tab: 'warehouse' as Tab },
-    { label: 'Sesje', value: '156', sub: 'historia pracy', color: 'text-purple-400', bg: 'bg-purple-500/10', border: 'border-purple-500/20', tab: 'machines' as Tab },
-  ];
+export default function App() {
   return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-semibold">Panel główny</h2>
-        <p className="text-sm text-muted-foreground mt-1">Przegląd gospodarstwa w jednym miejscu.</p>
-      </div>
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {cards.map((c) => (
-          <button
-            key={c.label}
-            onClick={() => onNavigate(c.tab)}
-            className={'rounded-xl border p-5 text-left transition-colors hover:bg-white/5 ' + c.bg + ' ' + c.border}
-          >
-            <p className="text-xs text-muted-foreground uppercase tracking-wide">{c.label}</p>
-            <p className={'text-3xl font-bold mt-1 ' + c.color}>{c.value}</p>
-            <p className="text-xs text-muted-foreground mt-1">{c.sub}</p>
-          </button>
-        ))}
-      </div>
-      <div className="rounded-xl border border-border bg-card p-5">
-        <h3 className="font-medium mb-2">Szybki start</h3>
-        <p className="text-sm text-muted-foreground">
-          To jest wersja startowa aplikacji. Moduły GIS, Dziennik, Field Pilot i Magazyn
-          działają w pełnej wersji w repozytorium GitHub — tutaj masz szkielet gotowy do rozbudowy.
-        </p>
-      </div>
-    </div>
-  );
-}
-
-function SimplePanel({ title, desc, icon, color, border, onNavigate, target, cta, ctaColor, extra, extraColor, extraBg, extraBorder, extraDesc, extraDesc2,}: {
-  title: string; desc: string; icon: string; color: string; border: string;
-  onNavigate: (t: Tab) => void; target: Tab; cta: string; ctaColor: string;
-  extra: string; extraColor: string; extraBg: string; extraBorder: string; extraDesc: string; extraDesc2: string;
-}) {
-  return (
-    <div className="space-y-6">
-      <div className={'rounded-xl border p-6 ' + color + ' ' + border}>
-        <div className="flex items-center gap-3 mb-3">
-          <span className="text-3xl">{icon}</span>
-          <h2 className="text-2xl font-semibold">{title}</h2>
-        </div>
-        <p className="text-sm opacity-80">{desc}</p>
-      </div>
-      <div className={'rounded-xl border p-5 ' + extraBg + ' ' + extraBorder}>
-        <h3 className={'font-medium ' + extraColor}>{extra}</h3>
-        <p className="text-sm text-muted-foreground mt-1">{extraDesc}</p>
-        <p className="text-sm text-muted-foreground">{extraDesc2}</p>
-      </div>
-      <button
-        onClick={() => onNavigate(target)}
-        className={'px-5 py-2.5 rounded-lg text-sm font-medium text-white transition-colors ' + ctaColor}
-      >
-        {cta}
-      </button>
-    </div>
-  );
-}
-
-function SettingsPanel({ resetMsg, clearMsg, onResetMsg, onClearMsg, onNavigate,}: {
-  resetMsg: string; clearMsg: string; onResetMsg: (v: string) => void; onClearMsg: (v: string) => void;
-  onNavigate: (t: Tab) => void;
-}) {
-  return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-semibold">Ustawienia</h2>
-        <p className="text-sm text-muted-foreground mt-1">Zarządzanie danymi demonstracyjnymi.</p>
-      </div>
-      <div className="grid sm:grid-cols-2 gap-4">
-        <div className="rounded-xl border border-slate-500/20 bg-slate-500/10 p-5">
-          <h3 className="font-medium text-slate-300">Reset danych</h3>
-          <p className="text-sm text-muted-foreground mt-1">Przywraca dane demonstracyjne.</p>
-          <p className="text-sm text-muted-foreground">Dane zapisane w localStorage przeglądarki.</p>
-          <button
-            onClick={() => {
-              try { localStorage.removeItem('fms-data'); } catch { /* ignore */ }
-              onResetMsg('Dane zresetowane.');
-              onClearMsg('');
-            }}
-            className="mt-4 px-4 py-2 rounded-lg text-sm font-medium bg-slate-700 hover:bg-slate-600 text-white transition-colors"
-          >
-            Resetuj dane demo
-          </button>
-          {resetMsg && <p className="text-xs text-green-400 mt-2">{resetMsg}</p>}
-        </div>
-        <div className="rounded-xl border border-red-500/20 bg-red-500/10 p-5">
-          <h3 className="font-medium text-red-400">Wyczyść wszystko</h3>
-          <p className="text-sm text-muted-foreground mt-1">Usuwa wszystkie dane z localStorage.</p>
-          <p className="text-sm text-muted-foreground">Nieodwracalne.</p>
-          <button
-            onClick={() => {
-              try {
-                Object.keys(localStorage)
-                  .filter((k) => k.startsWith('fms-'))
-                  .forEach((k) => localStorage.removeItem(k));
-              } catch { /* ignore */ }
-              onClearMsg('Wyczyszczono.');
-              onResetMsg('');
-            }}
-            className="mt-4 px-4 py-2 rounded-lg text-sm font-medium bg-red-700 hover:bg-red-600 text-white transition-colors"
-          >
-            Wyczyść dane
-          </button>
-          {clearMsg && <p className="text-xs text-red-400 mt-2">{clearMsg}</p>}
-        </div>
-      </div>
-      <button
-        onClick={() => onNavigate('dashboard')}
-        className="px-5 py-2.5 rounded-lg text-sm font-medium text-white bg-slate-600 hover:bg-slate-500 transition-colors"
-      >
-        Wróć do panelu
-      </button>
-    </div>
+    <FarmProvider>
+      <Shell />
+    </FarmProvider>
   );
 }
