@@ -1,48 +1,34 @@
-// FMS Precision 3.0 — Service Worker (offline shell)
-const CACHE = 'fms-precision-v6';
+const CACHE = 'fms-v1';
+const PRECACHE = ['/', '/index.html', '/manifest.webmanifest', '/icon.svg'];
 
-self.addEventListener('install', () => self.skipWaiting());
+self.addEventListener('install', (e) => {
+  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(PRECACHE)));
+  self.skipWaiting();
+});
 
 self.addEventListener('activate', (e) => {
   e.waitUntil(
-    caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim())
+    caches.keys().then((keys) =>
+      Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))
+    )
   );
+  self.clients.claim();
 });
 
 self.addEventListener('fetch', (e) => {
-  const req = e.request;
-  if (req.method !== 'GET') return;
-  const url = new URL(req.url);
-  // Nie buforuj żądań cross-origin (kafelki map, Open-Meteo) — sieć bezpośrednio.
-  if (url.origin !== self.location.origin) return;
-  // Vite modules are hot-reloaded source files, not stable offline assets.
-  if (url.pathname.startsWith('/src/') || url.pathname.startsWith('/@') || url.pathname.startsWith('/node_modules/')) {
-    e.respondWith(fetch(req));
-    return;
-  }
-
-  if (req.mode === 'navigate') {
-    e.respondWith(
-      fetch(req)
-        .then((r) => {
-          if (r.ok) {
-            const c = r.clone();
-            caches.open(CACHE).then((ca) => ca.put(req, c));
-          }
-          return r;
-        })
-        .catch(() => caches.match(req).then((m) => m || caches.match('./index.html')))
-    );
-    return;
-  }
-
+  if (e.request.method !== 'GET') return;
   e.respondWith(
-    caches.match(req).then((m) => m || fetch(req).then((r) => {
-      if (r.ok) {
-        const c = r.clone();
-        caches.open(CACHE).then((ca) => ca.put(req, c));
-      }
-      return r;
-    }).catch(() => m))
+    caches.match(e.request).then((cached) => {
+      const network = fetch(e.request)
+        .then((res) => {
+          if (res && res.status === 200 && res.type === 'basic') {
+            const clone = res.clone();
+            caches.open(CACHE).then((c) => c.put(e.request, clone));
+          }
+          return res;
+        })
+        .catch(() => cached);
+      return cached || network;
+    })
   );
 });
