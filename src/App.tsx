@@ -11,7 +11,7 @@ const TABS: { id: Tab; label: string }[] = [
 ];
 
 export default function App() {
-  const [tab, setTab] = useState<Tab>('dashboard);
+  const [tab, setTab] = useState<Tab>('dashboard');
   const [resetMsg, setResetMsg] = useState('');
   const [clearMsg, setClearMsg] = useState('');
 
