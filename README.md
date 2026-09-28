@@ -1,24 +1,23 @@
-# FMS Precision 3.0
+# FMS Precision
 
-Frontendowa aplikacja do zarządzania gospodarstwem rolnym (React + TypeScript + Vite).
-Dane trzymane lokalnie w `localStorage` przeglądarki. Działa jako PWA.
+Web application for farm management, field operations, GNSS guidance, inventory, finance, and crop analysis.
 
-## Szybki start
+## Development
 
-```bash
-yarn install
+```sh
+yarn install --frozen-lockfile
 yarn dev
 ```
 
-## Budowa pod Netlify
+Production build and tests:
 
-```bash
+```sh
 yarn build
+yarn test
 ```
 
-Wynik w katalogu `dist/`. Plik `netlify.toml` jest już skonfigurowany:
-- **Build command:** `yarn build`
-- **Publish directory:** `dist`
-- **Node:** 22
+## Terrain and field navigation
 
-Wgraj folder `dist` na https://app.netlify.com/drop albo połącz repozytorium GitHub z Netlify.
+Open **Teren 3D** to inspect a selected field over satellite imagery with a 3D elevation surface. The view uses MapLibre GL JS, Esri World Imagery, and Copernicus DEM GLO-30 tiles hosted by Microsoft Planetary Computer; an internet connection is required.
+
+Use **Otwórz nawigację Field Pilot** to open field guidance with the field selected.
