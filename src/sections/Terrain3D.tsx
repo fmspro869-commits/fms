@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { RealisticTerrainMap } from '@/components/terrain/RealisticTerrainMap';
+import { DEM_MAP_EXAGGERATION } from '@/components/terrain/demCalibration';
 import { Btn, Card, SectionTitle } from '@/components/common';
 import { useFarm } from '@/store/FarmContext';
 import type { Nav } from '@/App';
@@ -19,7 +20,7 @@ export default function Terrain3D({
 }) {
   const { state } = useFarm();
   const [fieldId, setFieldId] = useState('');
-  const [exaggeration, setExaggeration] = useState(1.3);
+  const [exaggeration, setExaggeration] = useState(DEM_MAP_EXAGGERATION);
   const selectedFieldId = state.fields.some((item) => item.id === fieldId) ? fieldId : '';
   const field = state.fields.find((item) => item.id === selectedFieldId);
 
@@ -61,7 +62,7 @@ export default function Terrain3D({
           <input
             type="range"
             min="1"
-            max="2.5"
+            max="3"
             step="0.1"
             value={exaggeration}
             onChange={(event) => setExaggeration(Number(event.target.value))}
@@ -78,8 +79,8 @@ export default function Terrain3D({
         </p>
       )}
       <p className="text-xs text-slate-500">
-        Mapa wymaga połączenia z internetem. Rzeźba pochodzi z Copernicus DEM GLO-30 udostępnianego przez Microsoft Planetary Computer,
-        a obraz satelitarny z Esri. Model DSM o rozdzielczości ok. 30 m może uwzględniać roślinność i zabudowę; nie zastępuje pomiarów terenowych.
+        Mapa wymaga połączenia z internetem. Rzeźba pochodzi z Copernicus DEM GLO-30 (kalibracja wizualna {DEM_MAP_EXAGGERATION}×).
+        Model DSM ~30 m może uwzględniać roślinność i zabudowę; nie zastępuje pomiarów RTK.
       </p>
     </div>
   );
