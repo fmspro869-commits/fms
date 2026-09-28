@@ -1,5 +1,8 @@
 import { useState } from 'react';
 
+export type { Nav, NavView } from '@/types/nav';
+export type { Nav as defaultNavType } from '@/types/nav';
+
 type Tab = 'dashboard' | 'fields' | 'machines' | 'warehouse' | 'settings';
 
 const TABS: { id: Tab; label: string }[] = [
@@ -212,7 +215,7 @@ function SettingsPanel({ resetMsg, clearMsg, onResetMsg, onClearMsg, onNavigate,
           <p className="text-sm text-muted-foreground">Dane zapisane w localStorage przeglądarki.</p>
           <button
             onClick={() => {
-              try { localStorage.removeItem('fms-data'); } catch {} 
+              try { localStorage.removeItem('fms-data'); } catch { /* ignore */ }
               onResetMsg('Dane zresetowane.');
               onClearMsg('');
             }}
@@ -232,7 +235,7 @@ function SettingsPanel({ resetMsg, clearMsg, onResetMsg, onClearMsg, onNavigate,
                 Object.keys(localStorage)
                   .filter((k) => k.startsWith('fms-'))
                   .forEach((k) => localStorage.removeItem(k));
-              } catch {} 
+              } catch { /* ignore */ }
               onClearMsg('Wyczyszczono.');
               onResetMsg('');
             }}
