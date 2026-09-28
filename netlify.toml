@@ -4,8 +4,33 @@
 
 [build.environment]
   NODE_VERSION = "22"
+  YARN_VERSION = "1.22.22"
+  NODE_OPTIONS = "--max-old-space-size=4096"
+  CI = "true"
 
+[context.production]
+  command = "yarn build"
+
+[context.deploy-preview]
+  command = "yarn build"
+
+[context.branch-deploy]
+  command = "yarn build"
+
+# SPA fallback — React Router / Field Pilot routes
 [[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200
+
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
