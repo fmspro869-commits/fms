@@ -3,6 +3,7 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls, PerspectiveCamera, Sky } from '@react-three/drei';
 import * as THREE from 'three';
 import { fetchCopernicusDemTile } from '@/components/terrain/copernicusDem';
+import { adaptiveMeshExaggeration } from '@/components/terrain/demCalibration';
 
 type LatLng = [number, number];
 type GuidanceLine = { label: string; segments: LatLng[][] };
@@ -24,6 +25,7 @@ interface Terrain {
   elevationColors: Float32Array;
   minElevation: number;
   maxElevation: number;
+  exaggeration: number;
   heightAt: (lat: number, lng: number) => number | null;
   slopeAt: (lat: number, lng: number) => number | null;
   elevationAt: (lat: number, lng: number) => number | null;
@@ -60,7 +62,6 @@ interface Props {
 const TERRAIN_SEGMENTS = 256;
 const DEM_ZOOM = 15;
 const TILE_SIZE = 256;
-const TERRAIN_EXAGGERATION = 2.5;
 
 function toMercatorPixel(lat: number, lng: number, zoom: number): [number, number] {
   const scale = TILE_SIZE * 2 ** zoom;
@@ -202,6 +203,7 @@ async function loadTerrain(origin: LatLng, size: number, signal: AbortSignal): P
   if (centerElevation === null || !Number.isFinite(range.min) || !Number.isFinite(range.max)) {
     throw new Error('Copernicus DEM nie zawiera danych wysokościowych w centrum widoku.');
   }
+  const exaggeration = adaptiveMeshExaggeration(range.max - range.min);
   const sampleGrid = (lat: number, lng: number) => {
     const [x, northing] = localMeters(lat, lng, origin);
     const column = Math.max(0, Math.min(TERRAIN_SEGMENTS, (x / size + 0.5) * TERRAIN_SEGMENTS));
@@ -231,7 +233,7 @@ async function loadTerrain(origin: LatLng, size: number, signal: AbortSignal): P
   };
   const heightAt = (lat: number, lng: number) => {
     const elevation = sampleGrid(lat, lng);
-    return elevation === null ? null : (elevation - centerElevation) * TERRAIN_EXAGGERATION;
+    return elevation === null ? null : (elevation - centerElevation) * exaggeration;
   };
   const slopeAt = (lat: number, lng: number) => {
     const deltaLat = 10 / 111132.92;
@@ -262,7 +264,7 @@ async function loadTerrain(origin: LatLng, size: number, signal: AbortSignal): P
     slopeColor.set([slopeRamp.r, slopeRamp.g, slopeRamp.b], index * 3);
     if (elevation !== null) {
       validVertices[index] = 1;
-      vertices.setZ(index, (elevation - centerElevation) * TERRAIN_EXAGGERATION);
+      vertices.setZ(index, (elevation - centerElevation) * exaggeration);
     } else {
       vertices.setZ(index, 0);
     }
@@ -343,6 +345,7 @@ async function loadTerrain(origin: LatLng, size: number, signal: AbortSignal): P
     elevationColors: terrainColor,
     minElevation: range.min,
     maxElevation: range.max,
+    exaggeration,
     heightAt,
     slopeAt,
     elevationAt,
@@ -842,7 +845,7 @@ export function FieldPilot3DNavigation(props: Props) {
           <div>{readout ? `${readout.elevation === null ? 'NO DATA' : `${readout.elevation.toFixed(0)} m · ${readout.slope === null ? '—' : `${readout.slope.toFixed(1)}%`}`}` : 'DEM'}</div>
           <div>{terrain ? `Copernicus DEM · ${terrain.minElevation.toFixed(0)}–${terrain.maxElevation.toFixed(0)} m` : 'Ładowanie DEM'}</div>
           <div>{imageryPatch ? `Esri SAT · z${imageryPatch.zoom}` : imageryRequest ? `Esri SAT · z${imageryRequest.zoom} · ładowanie…` : 'Esri SAT · z18'}</div>
-          <div className="text-slate-400">Rzeźba wizualna ×{TERRAIN_EXAGGERATION}</div>
+          <div className="text-slate-400">Rzeźba wizualna ×{terrain?.exaggeration ?? '—'}</div>
           {imageryError && <div role="status" className="max-w-40 text-amber-300">Brak zbliżonych kafli: {imageryError}</div>}
         </div>
       </div>
