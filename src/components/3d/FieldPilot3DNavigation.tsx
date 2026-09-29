@@ -1,5 +1,5 @@
 import { Component, useEffect, useMemo, useRef, useState, type ComponentRef, type ReactNode } from 'react';
-import { Canvas, useFrame } from '@react-three/fiber';
+import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls, PerspectiveCamera, Sky } from '@react-three/drei';
 import * as THREE from 'three';
 import { fetchCopernicusDemTile } from '@/components/terrain/copernicusDem';
@@ -8,6 +8,14 @@ type LatLng = [number, number];
 type GuidanceLine = { label: string; segments: LatLng[][] };
 type CameraMode = 'follow' | 'north-up' | 'top-down' | 'free';
 type ViewMode = 'satellite' | 'slope' | 'elevation';
+type ImageryRequest = { key: string; center: LatLng; zoom: number };
+
+interface ImageryPatch {
+  geometry: THREE.BufferGeometry;
+  texture: THREE.CanvasTexture;
+  zoom: number;
+  missingTiles: number;
+}
 
 interface Terrain {
   geometry: THREE.BufferGeometry;
@@ -49,9 +57,10 @@ interface Props {
   onOpenMap: () => void;
 }
 
-const TERRAIN_SEGMENTS = 128;
+const TERRAIN_SEGMENTS = 256;
 const DEM_ZOOM = 15;
 const TILE_SIZE = 256;
+const TERRAIN_EXAGGERATION = 2.5;
 
 function toMercatorPixel(lat: number, lng: number, zoom: number): [number, number] {
   const scale = TILE_SIZE * 2 ** zoom;
@@ -65,7 +74,7 @@ function toMercatorPixel(lat: number, lng: number, zoom: number): [number, numbe
 
 function localMeters(lat: number, lng: number, origin: LatLng): [number, number] {
   const metersPerLng = 111412.84 * Math.cos((origin[0] * Math.PI) / 180);
-  return [(lng - origin[1]) * metersPerLng, (origin[0] - lat) * 111132.92];
+  return [(lng - origin[1]) * metersPerLng, (lat - origin[0]) * 111132.92];
 }
 
 function getFieldCenter(field: LatLng[], position: Props['position'], track: LatLng[]): LatLng {
@@ -97,6 +106,34 @@ function tileRange(min: number, max: number): number[] {
 function getTileKey(x: number, y: number, zoom: number): string {
   const count = 2 ** zoom;
   return `${((x % count) + count) % count}/${y}`;
+}
+
+function tileBoundaryLatLng(x: number, y: number, zoom: number): LatLng {
+  const count = 2 ** zoom;
+  const longitude = (x / count) * 360 - 180;
+  const mercatorY = Math.PI * (1 - (2 * y) / count);
+  const latitude = (180 / Math.PI) * Math.atan(Math.sinh(mercatorY));
+  return [latitude, longitude];
+}
+
+function imageryRequestFor(
+  center: LatLng,
+  distance: number,
+  viewportHeight: number,
+  fov: number,
+): ImageryRequest {
+  const visibleHeight = 2 * distance * Math.tan((fov * Math.PI) / 360);
+  const metersPerPixel = visibleHeight / Math.max(1, viewportHeight);
+  const groundResolutionAtZoomZero = 156543.03392 * Math.cos((center[0] * Math.PI) / 180);
+  const zoom = Math.max(16, Math.min(20, Math.floor(Math.log2(groundResolutionAtZoomZero / metersPerPixel))));
+  const [worldX, worldY] = toMercatorPixel(center[0], center[1], zoom);
+  const tileX = Math.floor(worldX / TILE_SIZE);
+  const tileY = Math.floor(worldY / TILE_SIZE);
+  return {
+    key: `${zoom}:${tileX}:${tileY}`,
+    center,
+    zoom,
+  };
 }
 
 function makeRampColor(value: number): THREE.Color {
@@ -167,14 +204,34 @@ async function loadTerrain(origin: LatLng, size: number, signal: AbortSignal): P
   }
   const sampleGrid = (lat: number, lng: number) => {
     const [x, northing] = localMeters(lat, lng, origin);
-    const column = Math.max(0, Math.min(TERRAIN_SEGMENTS, Math.round((x / size + 0.5) * TERRAIN_SEGMENTS)));
-    const row = Math.max(0, Math.min(TERRAIN_SEGMENTS, Math.round((northing / size + 0.5) * TERRAIN_SEGMENTS)));
-    const elevation = elevations[row * (TERRAIN_SEGMENTS + 1) + column];
-    return Number.isFinite(elevation) ? elevation : null;
+    const column = Math.max(0, Math.min(TERRAIN_SEGMENTS, (x / size + 0.5) * TERRAIN_SEGMENTS));
+    const row = Math.max(0, Math.min(TERRAIN_SEGMENTS, (0.5 - northing / size) * TERRAIN_SEGMENTS));
+    const x0 = Math.floor(column);
+    const y0 = Math.floor(row);
+    const x1 = Math.min(TERRAIN_SEGMENTS, x0 + 1);
+    const y1 = Math.min(TERRAIN_SEGMENTS, y0 + 1);
+    const tx = column - x0;
+    const ty = row - y0;
+    const samples = [
+      [x0, y0, (1 - tx) * (1 - ty)],
+      [x1, y0, tx * (1 - ty)],
+      [x0, y1, (1 - tx) * ty],
+      [x1, y1, tx * ty],
+    ] as const;
+    let weightedElevation = 0;
+    let validWeight = 0;
+    for (const [sampleX, sampleY, weight] of samples) {
+      const elevation = elevations[sampleY * (TERRAIN_SEGMENTS + 1) + sampleX];
+      if (Number.isFinite(elevation) && weight > 0) {
+        weightedElevation += elevation * weight;
+        validWeight += weight;
+      }
+    }
+    return validWeight > 0 ? weightedElevation / validWeight : null;
   };
   const heightAt = (lat: number, lng: number) => {
     const elevation = sampleGrid(lat, lng);
-    return elevation === null ? null : (elevation - centerElevation) * 1.5;
+    return elevation === null ? null : (elevation - centerElevation) * TERRAIN_EXAGGERATION;
   };
   const slopeAt = (lat: number, lng: number) => {
     const deltaLat = 10 / 111132.92;
@@ -205,7 +262,7 @@ async function loadTerrain(origin: LatLng, size: number, signal: AbortSignal): P
     slopeColor.set([slopeRamp.r, slopeRamp.g, slopeRamp.b], index * 3);
     if (elevation !== null) {
       validVertices[index] = 1;
-      vertices.setZ(index, (elevation - centerElevation) * 1.5);
+      vertices.setZ(index, (elevation - centerElevation) * TERRAIN_EXAGGERATION);
     } else {
       vertices.setZ(index, 0);
     }
@@ -228,7 +285,7 @@ async function loadTerrain(origin: LatLng, size: number, signal: AbortSignal): P
   geometry.computeVertexNormals();
   geometry.computeBoundingSphere();
 
-  const imageryZoom = 16;
+  const imageryZoom = 18;
   const [westPixel, northPixel] = toMercatorPixel(origin[0] + latitudeOffset, origin[1] - longitudeOffset, imageryZoom);
   const [eastPixel, southPixel] = toMercatorPixel(origin[0] - latitudeOffset, origin[1] + longitudeOffset, imageryZoom);
   const imageryXs = tileRange(westPixel, eastPixel);
@@ -262,6 +319,8 @@ async function loadTerrain(origin: LatLng, size: number, signal: AbortSignal): P
   const satellite = new THREE.CanvasTexture(imageryCanvas);
   satellite.colorSpace = THREE.SRGBColorSpace;
   satellite.anisotropy = 4;
+  satellite.minFilter = THREE.LinearMipmapLinearFilter;
+  satellite.magFilter = THREE.LinearFilter;
   const uvs = geometry.attributes.uv;
   for (let index = 0; index < vertices.count; index++) {
     const x = vertices.getX(index);
@@ -291,6 +350,131 @@ async function loadTerrain(origin: LatLng, size: number, signal: AbortSignal): P
   };
 }
 
+async function loadImageryPatch(
+  request: ImageryRequest,
+  origin: LatLng,
+  terrainSize: number,
+  terrain: Terrain,
+  signal: AbortSignal,
+): Promise<ImageryPatch> {
+  const tileCount = 2 ** request.zoom;
+  const [worldX, worldY] = toMercatorPixel(request.center[0], request.center[1], request.zoom);
+  const centerTileX = Math.floor(worldX / TILE_SIZE);
+  const centerTileY = Math.floor(worldY / TILE_SIZE);
+  const firstTileX = centerTileX - 1;
+  const firstTileY = Math.max(0, centerTileY - 1);
+  const lastTileY = Math.min(tileCount - 1, centerTileY + 1);
+  const rowCount = lastTileY - firstTileY + 1;
+  const tileCanvas = document.createElement('canvas');
+  tileCanvas.width = TILE_SIZE * 3;
+  tileCanvas.height = TILE_SIZE * rowCount;
+  const context = tileCanvas.getContext('2d');
+  if (!context) throw new Error('Brak kontekstu Canvas do obrazu satelitarnego.');
+
+  let missingTiles = 0;
+  await Promise.all(Array.from({ length: rowCount }, (_, row) =>
+    Array.from({ length: 3 }, async (_, column) => {
+      const tileX = firstTileX + column;
+      const tileY = firstTileY + row;
+      const wrappedX = ((tileX % tileCount) + tileCount) % tileCount;
+      const url = `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${request.zoom}/${tileY}/${wrappedX}`;
+      try {
+        const response = await fetch(url, { signal });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const bitmap = await createImageBitmap(await response.blob());
+        try {
+          context.drawImage(bitmap, column * TILE_SIZE, row * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+        } finally {
+          bitmap.close();
+        }
+      } catch (error) {
+        if (signal.aborted) throw error;
+        missingTiles++;
+      }
+    }),
+  ).flat());
+  if (missingTiles === rowCount * 3) {
+    throw new Error(`Nie udało się pobrać kafli satelitarnych Esri w zoomie ${request.zoom}.`);
+  }
+
+  const feather = context.createRadialGradient(
+    tileCanvas.width / 2,
+    tileCanvas.height / 2,
+    Math.min(tileCanvas.width, tileCanvas.height) * 0.36,
+    tileCanvas.width / 2,
+    tileCanvas.height / 2,
+    Math.min(tileCanvas.width, tileCanvas.height) * 0.72,
+  );
+  feather.addColorStop(0, 'rgba(255,255,255,1)');
+  feather.addColorStop(0.75, 'rgba(255,255,255,0.96)');
+  feather.addColorStop(1, 'rgba(255,255,255,0)');
+  context.globalCompositeOperation = 'destination-in';
+  context.fillStyle = feather;
+  context.fillRect(0, 0, tileCanvas.width, tileCanvas.height);
+  context.globalCompositeOperation = 'source-over';
+
+  const northWest = tileBoundaryLatLng(firstTileX, firstTileY, request.zoom);
+  const southEast = tileBoundaryLatLng(centerTileX + 2, lastTileY + 1, request.zoom);
+  const [westX] = localMeters(northWest[0], northWest[1], origin);
+  const [eastX] = localMeters(southEast[0], southEast[1], origin);
+  const northingNorth = (northWest[0] - origin[0]) * 111132.92;
+  const northingSouth = (southEast[0] - origin[0]) * 111132.92;
+  const minX = Math.max(-terrainSize / 2, westX);
+  const maxX = Math.min(terrainSize / 2, eastX);
+  const minNorthing = Math.max(-terrainSize / 2, northingSouth);
+  const maxNorthing = Math.min(terrainSize / 2, northingNorth);
+  if (maxX <= minX || maxNorthing <= minNorthing) {
+    throw new Error('Kafle satelitarne nie obejmują widocznego terenu.');
+  }
+
+  const centerX = (minX + maxX) / 2;
+  const centerNorthing = (minNorthing + maxNorthing) / 2;
+  const patchGeometry = new THREE.PlaneGeometry(maxX - minX, maxNorthing - minNorthing, 96, 96);
+  const vertices = patchGeometry.attributes.position;
+  const uvs = patchGeometry.attributes.uv;
+  const validVertices = new Uint8Array(vertices.count);
+  for (let index = 0; index < vertices.count; index++) {
+    const x = centerX + vertices.getX(index);
+    const northing = centerNorthing + vertices.getY(index);
+    const lat = origin[0] + northing / 111132.92;
+    const lng = origin[1] + x / (111412.84 * Math.cos((origin[0] * Math.PI) / 180));
+    const height = terrain.heightAt(lat, lng);
+    if (height !== null) {
+      vertices.setZ(index, height + 0.14);
+      validVertices[index] = 1;
+    } else {
+      vertices.setZ(index, 0);
+    }
+    const [pixelX, pixelY] = toMercatorPixel(lat, lng, request.zoom);
+    uvs.setXY(
+      index,
+      (pixelX - firstTileX * TILE_SIZE) / tileCanvas.width,
+      1 - (pixelY - firstTileY * TILE_SIZE) / tileCanvas.height,
+    );
+  }
+  const sourceIndices = patchGeometry.getIndex();
+  if (!sourceIndices) throw new Error('Nie można utworzyć geometrii szczegółowych kafli satelitarnych.');
+  const validIndices: number[] = [];
+  for (let index = 0; index < sourceIndices.count; index += 3) {
+    const a = sourceIndices.getX(index);
+    const b = sourceIndices.getX(index + 1);
+    const c = sourceIndices.getX(index + 2);
+    if (validVertices[a] && validVertices[b] && validVertices[c]) validIndices.push(a, b, c);
+  }
+  patchGeometry.setIndex(validIndices);
+  patchGeometry.translate(centerX, centerNorthing, 0);
+  patchGeometry.rotateX(-Math.PI / 2);
+  patchGeometry.computeVertexNormals();
+  patchGeometry.computeBoundingSphere();
+
+  const texture = new THREE.CanvasTexture(tileCanvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = 8;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  return { geometry: patchGeometry, texture, zoom: request.zoom, missingTiles };
+}
+
 function useTerrain(origin: LatLng, size: number, reload: number) {
   const [result, setResult] = useState<{ key: string; terrain: Terrain | null; error: string | null }>({ key: '', terrain: null, error: null });
   const key = `${origin[0]}:${origin[1]}:${size}:${reload}`;
@@ -313,6 +497,44 @@ function useTerrain(origin: LatLng, size: number, reload: number) {
   return result.key === key ? result : { terrain: null, error: null };
 }
 
+function useImageryPatch(
+  request: ImageryRequest | null,
+  origin: LatLng,
+  size: number,
+  terrain: Terrain | null,
+) {
+  const [result, setResult] = useState<{ key: string; patch: ImageryPatch | null; error: string | null }>({
+    key: '',
+    patch: null,
+    error: null,
+  });
+  useEffect(() => {
+    if (!request || !terrain) return;
+    const controller = new AbortController();
+    void loadImageryPatch(request, origin, size, terrain, controller.signal).then(
+      (patch) => setResult({ key: request.key, patch, error: null }),
+      (error: unknown) => {
+        if (!controller.signal.aborted) {
+          setResult({
+            key: request.key,
+              patch: null,
+            error: error instanceof Error ? error.message : 'Nie udało się pobrać szczegółowych kafli Esri.',
+          });
+        }
+      },
+    );
+    return () => controller.abort();
+  }, [request, origin, size, terrain]);
+  useEffect(() => () => {
+    result.patch?.geometry.dispose();
+    result.patch?.texture.dispose();
+  }, [result.patch]);
+  return {
+    patch: result.patch,
+    error: result.key === request?.key ? result.error : null,
+  };
+}
+
 function TerrainMesh({ terrain, view }: { terrain: Terrain; view: ViewMode }) {
   const geometry = useMemo(() => {
     const copy = terrain.geometry.clone();
@@ -325,6 +547,21 @@ function TerrainMesh({ terrain, view }: { terrain: Terrain; view: ViewMode }) {
   return (
     <mesh geometry={geometry} receiveShadow>
       <meshStandardMaterial map={terrain.satellite} vertexColors={view !== 'satellite'} roughness={0.95} />
+    </mesh>
+  );
+}
+
+function ImageryMesh({ patch }: { patch: ImageryPatch }) {
+  return (
+    <mesh geometry={patch.geometry} renderOrder={1}>
+      <meshStandardMaterial
+        map={patch.texture}
+        transparent
+        depthWrite={false}
+        polygonOffset
+        polygonOffsetFactor={-1}
+        roughness={0.92}
+      />
     </mesh>
   );
 }
@@ -443,7 +680,7 @@ function Tractor({
 }
 
 function CameraRig({
-  position, origin, terrain, heading, mode, size,
+  position, origin, terrain, heading, mode, size, zoomFactor, onImageryRequest,
 }: {
   position: Props['position'];
   origin: LatLng;
@@ -451,35 +688,63 @@ function CameraRig({
   heading: number | null;
   mode: CameraMode;
   size: number;
+  zoomFactor: number;
+  onImageryRequest: (request: ImageryRequest) => void;
 }) {
   const camera = useRef<THREE.PerspectiveCamera>(null);
   const controls = useRef<ComponentRef<typeof OrbitControls>>(null);
+  const lastImageryKey = useRef('');
+  const viewport = useThree((state) => state.size);
   useFrame(() => {
-    if (!camera.current || mode === 'free') return;
-    const lat = position?.lat ?? origin[0];
-    const lng = position?.lng ?? origin[1];
-    const [x, northing] = localMeters(lat, lng, origin);
-    const z = -northing;
-    const elevation = terrain.heightAt(lat, lng) ?? terrain.heightAt(origin[0], origin[1]) ?? 0;
-    const bearing = heading !== null && Number.isFinite(heading) ? (heading * Math.PI) / 180 : 0;
-    const distance = Math.max(24, size * 0.16);
-    const target = new THREE.Vector3(x, elevation + 1.5, z);
-    const destination = mode === 'top-down'
-      ? new THREE.Vector3(x, elevation + size * 0.42, z + 0.01)
-      : mode === 'north-up'
-        ? new THREE.Vector3(x + distance * 0.45, elevation + distance * 0.7, z + distance)
-        : new THREE.Vector3(x - Math.sin(bearing) * distance, elevation + distance * 0.58, z + Math.cos(bearing) * distance);
-    camera.current.position.lerp(destination, 0.12);
-    camera.current.lookAt(target);
-    if (controls.current) {
-      controls.current.target.lerp(target, 0.12);
-      controls.current.update();
+    if (!camera.current) return;
+    let target: THREE.Vector3;
+    let expectedDistance: number;
+    if (mode !== 'free') {
+      const lat = position?.lat ?? origin[0];
+      const lng = position?.lng ?? origin[1];
+      const [x, northing] = localMeters(lat, lng, origin);
+      const z = -northing;
+      const elevation = terrain.heightAt(lat, lng) ?? terrain.heightAt(origin[0], origin[1]) ?? 0;
+      const bearing = heading !== null && Number.isFinite(heading) ? (heading * Math.PI) / 180 : 0;
+      const distance = Math.max(12, size * (mode === 'top-down' ? 0.42 : 0.16) / zoomFactor);
+      target = new THREE.Vector3(x, elevation + 1.5, z);
+      const destination = mode === 'top-down'
+        ? new THREE.Vector3(x, elevation + distance, z + 0.01)
+        : mode === 'north-up'
+          ? new THREE.Vector3(x + distance * 0.45, elevation + distance * 0.7, z + distance)
+          : new THREE.Vector3(x - Math.sin(bearing) * distance, elevation + distance * 0.58, z + Math.cos(bearing) * distance);
+      expectedDistance = destination.distanceTo(target);
+      camera.current.position.lerp(destination, 0.12);
+      camera.current.lookAt(target);
+      if (controls.current) {
+        controls.current.target.lerp(target, 0.12);
+        controls.current.update();
+      }
+    } else {
+      target = controls.current?.target ?? new THREE.Vector3();
+      expectedDistance = camera.current.position.distanceTo(target);
+    }
+    const center: LatLng = [
+      origin[0] - target.z / 111132.92,
+      origin[1] + target.x / (111412.84 * Math.cos((origin[0] * Math.PI) / 180)),
+    ];
+    const request = imageryRequestFor(center, expectedDistance, viewport.height, camera.current.fov);
+    if (request.key !== lastImageryKey.current) {
+      lastImageryKey.current = request.key;
+      onImageryRequest(request);
     }
   });
   return (
     <>
       <PerspectiveCamera ref={camera} makeDefault fov={50} position={[0, size * 0.45, size * 0.25]} />
-      <OrbitControls ref={controls} enabled={mode === 'free'} enablePan maxPolarAngle={Math.PI / 2.03} minDistance={12} maxDistance={size * 1.5} />
+      <OrbitControls
+        ref={controls}
+        enabled={mode === 'free'}
+        enablePan
+        maxPolarAngle={Math.PI / 2.03}
+        minDistance={Math.max(4, size * 0.16 / 8)}
+        maxDistance={size * 1.5}
+      />
     </>
   );
 }
@@ -508,6 +773,8 @@ export function FieldPilot3DNavigation(props: Props) {
   const [cameraMode, setCameraMode] = useState<CameraMode>('follow');
   const [view, setView] = useState<ViewMode>('satellite');
   const [reload, setReload] = useState(0);
+  const [zoomFactor, setZoomFactor] = useState(1);
+  const [imageryRequest, setImageryRequest] = useState<ImageryRequest | null>(null);
   useEffect(() => {
     if (!originWasKnownRef.current && position) {
       setOrigin([position.lat, position.lng]);
@@ -517,6 +784,7 @@ export function FieldPilot3DNavigation(props: Props) {
 
   const size = useMemo(() => getFieldSize(fieldGeo, origin), [fieldGeo, origin]);
   const { terrain, error } = useTerrain(origin, size, reload);
+  const { patch: imageryPatch, error: imageryError } = useImageryPatch(imageryRequest, origin, size, terrain);
   const readout = useMemo(() => {
     if (!terrain) return null;
     const samplePosition = position ? [position.lat, position.lng] as LatLng : origin;
@@ -531,13 +799,23 @@ export function FieldPilot3DNavigation(props: Props) {
     <div className="absolute inset-0 overflow-hidden bg-slate-950 text-white" data-testid="fieldpilot-three-scene">
       <SceneBoundary>
         {terrain && (
-          <Canvas shadows dpr={[1, 1.5]} camera={{ fov: 50, position: [0, size * 0.45, size * 0.25] }} gl={{ antialias: true, powerPreference: 'high-performance' }}>
-            <CameraRig position={position} origin={origin} terrain={terrain} heading={heading} mode={cameraMode} size={size} />
+          <Canvas shadows dpr={[1, 2]} camera={{ fov: 50, position: [0, size * 0.45, size * 0.25] }} gl={{ antialias: true, powerPreference: 'high-performance' }}>
+            <CameraRig
+              position={position}
+              origin={origin}
+              terrain={terrain}
+              heading={heading}
+              mode={cameraMode}
+              size={size}
+              zoomFactor={zoomFactor}
+              onImageryRequest={setImageryRequest}
+            />
             <Sky sunPosition={night ? [-100, -10, -100] : [100, 40, 100]} />
             <fog attach="fog" args={[night ? '#020617' : '#c6d9e8', size * 0.8, size * 3]} />
             <ambientLight intensity={night ? 0.45 : 0.8} />
             <directionalLight position={[30, 70, 25]} intensity={night ? 0.75 : 1.5} castShadow />
             <TerrainMesh terrain={terrain} view={view} />
+            {view === 'satellite' && imageryPatch && <ImageryMesh patch={imageryPatch} />}
             <Paths origin={origin} terrain={terrain} field={fieldGeo} lines={guidanceLines} activeLabel={activeLabel} doneLabels={doneLabels} track={track} />
             {position && <Tractor position={position} origin={origin} terrain={terrain} heading={heading} width={implementWidth} />}
           </Canvas>
@@ -563,6 +841,9 @@ export function FieldPilot3DNavigation(props: Props) {
           <div className="font-bold text-emerald-300">{info.activeLine?.label ?? 'NO LINE'}</div>
           <div>{readout ? `${readout.elevation === null ? 'NO DATA' : `${readout.elevation.toFixed(0)} m · ${readout.slope === null ? '—' : `${readout.slope.toFixed(1)}%`}`}` : 'DEM'}</div>
           <div>{terrain ? `Copernicus DEM · ${terrain.minElevation.toFixed(0)}–${terrain.maxElevation.toFixed(0)} m` : 'Ładowanie DEM'}</div>
+          <div>{imageryPatch ? `Esri SAT · z${imageryPatch.zoom}` : imageryRequest ? `Esri SAT · z${imageryRequest.zoom} · ładowanie…` : 'Esri SAT · z18'}</div>
+          <div className="text-slate-400">Rzeźba wizualna ×{TERRAIN_EXAGGERATION}</div>
+          {imageryError && <div role="status" className="max-w-40 text-amber-300">Brak zbliżonych kafli: {imageryError}</div>}
         </div>
       </div>
 
@@ -574,6 +855,23 @@ export function FieldPilot3DNavigation(props: Props) {
                 {mode === 'north-up' ? 'NORTH' : mode.toUpperCase()}
               </button>
             ))}
+            <button
+              onClick={() => setZoomFactor((value) => Math.min(8, value * 1.5))}
+              disabled={cameraMode === 'free' || zoomFactor >= 8}
+              className="min-h-10 min-w-12 rounded-xl border border-white/15 bg-slate-950/75 px-2 text-base font-black backdrop-blur-md disabled:opacity-40"
+              aria-label="Przybliż widok terenu 3D"
+              title={cameraMode === 'free' ? 'W trybie FREE użyj kółka myszy lub gestu szczypania' : 'Przybliż widok i pobierz dokładniejsze kafle satelitarne'}
+            >
+              +
+            </button>
+            <button
+              onClick={() => setZoomFactor((value) => Math.max(1, value / 1.5))}
+              disabled={cameraMode === 'free' || zoomFactor <= 1}
+              className="min-h-10 min-w-12 rounded-xl border border-white/15 bg-slate-950/75 px-2 text-base font-black backdrop-blur-md disabled:opacity-40"
+              aria-label="Oddal widok terenu 3D"
+            >
+              −
+            </button>
             <button onClick={() => setView((value) => value === 'satellite' ? 'slope' : value === 'slope' ? 'elevation' : 'satellite')} className="min-h-10 rounded-xl border border-white/15 bg-slate-950/75 px-2 text-[9px] font-black backdrop-blur-md">
               {view.toUpperCase()}
             </button>
